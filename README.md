@@ -115,6 +115,20 @@ Outputs `[START]`/`[STEP]`/`[END]` format per competition spec.
 | `SERPER_API_KEY`       | No       | Falls back to simulated search       |
 | `FINQA_TASK`           | No       | `basic_retrieval`                  |
 
+## Training an Agent
+
+Train a small LLM (Qwen 2.5-1.5B) to learn cost-aware tool selection using Expert Iteration (rejection sampling + SFT):
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nsharan2000/cost-aware-finqa/blob/main/Cost_Aware_FinQA_Training.ipynb)
+
+The [training notebook](Cost_Aware_FinQA_Training.ipynb) covers:
+1. Random agent baseline
+2. Pre-trained LLM baseline (out-of-the-box Qwen 2.5-1.5B)
+3. Expert Iteration training with Unsloth (4-bit LoRA)
+4. Post-training evaluation and comparison plots
+
+The agent learns to prefer free SQL queries over expensive tools, improving scores while reducing costs.
+
 ## Validation
 
 ```bash
