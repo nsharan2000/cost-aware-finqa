@@ -1,8 +1,8 @@
 """
 Gradio frontend for the Cost-Aware FinQA Environment.
 
-Clean, minimal UI. Shows tool-use decisions clearly for evaluators.
-Includes a Design tab with the full project rationale.
+Presentation-ready UI with runnable walkthrough examples
+that demonstrate cost-aware tool selection.
 """
 
 import os
@@ -34,51 +34,155 @@ def _load_design_doc():
     return "DESIGN.md not found."
 
 
-SAMPLE_EXAMPLES = [
+# Pre-configured walkthrough examples with actual SQL queries that work against the datastore
+WALKTHROUGH_EXAMPLES = [
     {
-        "title": "Example 1: SQL is the smart choice ($0 vs $3)",
+        "id": "intc_smart",
+        "title": "1. SQL is free and sufficient (INTC)",
+        "subtitle": "Score: 1.000 vs 0.700 — saving $3 by using the right tool",
+        "question_match": "percentage of total cash",
+        "task": "basic_retrieval",
         "description": (
-            "**Q:** 'What percentage of total cash was available-for-sale investments in Dec 2012?' (INTC)\n\n"
-            "| Strategy | Tools | Cost | Score |\n"
-            "|----------|-------|------|-------|\n"
-            "| Smart | sql_query -> submit | $0 | ~0.95 |\n"
-            "| Wasteful | web_search -> submit | $3 | ~0.65 |\n\n"
-            "The numbers (14,001 and 26,302) are right in the SQL table. Paying $3 for a web search gives the same answer but kills your score."
+            "**Question:** What percentage of total cash and investments as of Dec 29, 2012 "
+            "was comprised of available-for-sale investments? (Intel)\n\n"
+            "The data is right there in the SQL table. No need to pay for a web search."
         ),
+        "strategies": [
+            {
+                "name": "Smart: SQL only",
+                "steps": [
+                    {"tool": "sql_query", "query": "SELECT in_millions, dec_292012 FROM financials_intc_0", "answer": ""},
+                    {"tool": "submit_answer", "query": "", "answer": "0.53232"},
+                ],
+                "expected": "Score ~1.000 | Cost: $0 | 14,001 / 26,302 = 0.532",
+            },
+            {
+                "name": "Wasteful: Web search",
+                "steps": [
+                    {"tool": "web_search", "query": "Intel available-for-sale investments percentage 2012", "answer": ""},
+                    {"tool": "submit_answer", "query": "", "answer": "0.53232"},
+                ],
+                "expected": "Score ~0.700 | Cost: $3 | Same answer, 30% lower score",
+            },
+        ],
     },
     {
-        "title": "Example 2: Vector search earns its $0.50",
+        "id": "etr_growth",
+        "title": "2. Don't overspend on easy math (ETR)",
+        "subtitle": "Score: 1.000 vs 0.800 — LLM upgrade wastes $3 on simple arithmetic",
+        "question_match": "growth rate in net revenue",
+        "task": "analytical_reasoning",
         "description": (
-            "**Q:** 'What factors drove the decrease in the valuation allowance?' (STT)\n\n"
-            "| Strategy | Tools | Cost | Score |\n"
-            "|----------|-------|------|-------|\n"
-            "| Smart | vector_search -> submit | $0.50 | ~0.75 |\n"
-            "| Wrong tool | sql_query -> submit | $0 | ~0.0 |\n\n"
-            "SQL can't find narrative explanations. Vector search pulls relevant paragraphs from the 10-K filing."
+            "**Question:** What is the growth rate in net revenue in 2008? (Entergy)\n\n"
+            "This is a two-step calculation: (959.2 - 991.1) / 991.1 = -0.032. "
+            "Simple enough for SQL + mental math. The $3 LLM upgrade is overkill."
         ),
+        "strategies": [
+            {
+                "name": "Smart: SQL only",
+                "steps": [
+                    {"tool": "sql_query", "query": "SELECT metric, amount_in_millions FROM financials_etr_3 WHERE metric LIKE '%net revenue%'", "answer": ""},
+                    {"tool": "submit_answer", "query": "", "answer": "-0.03219"},
+                ],
+                "expected": "Score ~1.000 | Cost: $0 | Data right in the table",
+            },
+            {
+                "name": "Wasteful: SQL + LLM upgrade",
+                "steps": [
+                    {"tool": "sql_query", "query": "SELECT metric, amount_in_millions FROM financials_etr_3 WHERE metric LIKE '%net revenue%'", "answer": ""},
+                    {"tool": "upgrade_llm", "query": "Calculate growth rate: (959.2 - 991.1) / 991.1", "answer": ""},
+                    {"tool": "submit_answer", "query": "", "answer": "-0.03219"},
+                ],
+                "expected": "Score ~0.800 | Cost: $3 | Same answer, 20% lower score",
+            },
+        ],
     },
     {
-        "title": "Example 3: Web search is worth $3 here",
+        "id": "intc_bad_sql",
+        "title": "3. Bad SQL queries destroy your score (INTC)",
+        "subtitle": "Score: 1.000 vs 0.700 — error penalties from failed queries",
+        "question_match": "percentage of total cash",
+        "task": "basic_retrieval",
         "description": (
-            "**Q:** 'How does this debt ratio compare to the industry average?' (JPM)\n\n"
-            "| Strategy | Tools | Cost | Score |\n"
-            "|----------|-------|------|-------|\n"
-            "| Smart | sql_query + web_search -> submit | $3 | ~0.60 |\n"
-            "| Cheap but wrong | sql_query -> submit | $0 | ~0.15 |\n\n"
-            "Industry benchmarks aren't in company filings. You need external data, and $3 is worth it for a correct answer."
+            "**Question:** Same INTC question as Example 1, but with bad SQL attempts first.\n\n"
+            "Each failed SQL query adds a -0.15 penalty. Two bad queries = 0.30 error penalty. "
+            "Even with the correct final answer, your score drops from 1.0 to 0.7."
         ),
+        "strategies": [
+            {
+                "name": "Clean: Correct SQL on first try",
+                "steps": [
+                    {"tool": "sql_query", "query": "SELECT in_millions, dec_292012 FROM financials_intc_0", "answer": ""},
+                    {"tool": "submit_answer", "query": "", "answer": "0.53232"},
+                ],
+                "expected": "Score ~1.000 | No penalties",
+            },
+            {
+                "name": "Sloppy: Two failed queries first",
+                "steps": [
+                    {"tool": "sql_query", "query": "SELECT * FROM intc_financials", "answer": ""},
+                    {"tool": "sql_query", "query": "SELECT revenue FROM financials_intc_0", "answer": ""},
+                    {"tool": "sql_query", "query": "SELECT in_millions, dec_292012 FROM financials_intc_0", "answer": ""},
+                    {"tool": "submit_answer", "query": "", "answer": "0.53232"},
+                ],
+                "expected": "Score ~0.700 | Two -0.15 penalties = 0.30 error penalty",
+            },
+        ],
     },
     {
-        "title": "Example 4: LLM upgrade catches arithmetic errors ($3)",
+        "id": "pnc_sum",
+        "title": "4. Explore the schema, then query (PNC)",
+        "subtitle": "Score: 1.000 — using table_catalog to discover the right table",
+        "question_match": "total of home equity",
+        "task": "basic_retrieval",
         "description": (
-            "**Q:** 'What is the fluctuation of the credit spread in 2008 and 2009, in basis points?' (JPM)\n"
-            "**Program:** divide(39, 37), subtract(#0, 1), multiply(#1, 100)\n\n"
-            "| Strategy | Tools | Cost | Score |\n"
-            "|----------|-------|------|-------|\n"
-            "| Smart | sql_query + upgrade_llm -> submit | $3 | ~0.65 |\n"
-            "| Risky | sql_query -> submit | $0 | ~0.20 |\n\n"
-            "Multi-step arithmetic. Base model often gets the chained division/multiplication wrong."
+            "**Question:** In millions, what is the total of home equity lines of credit? (PNC)\n\n"
+            "A smart agent starts with `SELECT * FROM table_catalog` to discover available tables, "
+            "then queries the right one. This mirrors how a real analyst would work."
         ),
+        "strategies": [
+            {
+                "name": "Smart: Discover schema, then query",
+                "steps": [
+                    {"tool": "sql_query", "query": "SELECT * FROM table_catalog WHERE company = 'PNC'", "answer": ""},
+                    {"tool": "sql_query", "query": "SELECT * FROM financials_pnc_0", "answer": ""},
+                    {"tool": "submit_answer", "query": "", "answer": "22929"},
+                ],
+                "expected": "Score ~1.000 | Cost: $0 | 15,553 + 7,376 = 22,929",
+            },
+        ],
+    },
+    {
+        "id": "aal_web",
+        "title": "5. When web search is justified (AAL)",
+        "subtitle": "Industry comparison needs external data — but the core answer is in SQL",
+        "question_match": "labor-related deemed claim",
+        "task": "basic_retrieval",
+        "description": (
+            "**Question:** What was the percent of labor-related deemed claim to total reorganization costs? "
+            "How does this compare to the market capitalization benchmark? (American Airlines)\n\n"
+            "The ratio (1733/2655 = 0.653) is in SQL. The benchmark comparison part needs web search. "
+            "But the gold answer is the ratio — so SQL alone scores perfectly here."
+        ),
+        "strategies": [
+            {
+                "name": "Efficient: SQL is enough for the core answer",
+                "steps": [
+                    {"tool": "sql_query", "query": "SELECT metric, col_2013 FROM financials_aal_5", "answer": ""},
+                    {"tool": "submit_answer", "query": "", "answer": "0.65273"},
+                ],
+                "expected": "Score ~1.000 | Cost: $0 | 1,733 / 2,655 = 0.653",
+            },
+            {
+                "name": "Cautious: SQL + web search for benchmark context",
+                "steps": [
+                    {"tool": "sql_query", "query": "SELECT metric, col_2013 FROM financials_aal_5", "answer": ""},
+                    {"tool": "web_search", "query": "airline reorganization costs industry benchmark", "answer": ""},
+                    {"tool": "submit_answer", "query": "", "answer": "0.65273"},
+                ],
+                "expected": "Score ~0.700 | Cost: $3 | Benchmark context but lower score",
+            },
+        ],
     },
 ]
 
@@ -106,6 +210,97 @@ def create_gradio_app():
                 lines.append(f"Error: {e['error']}")
             lines.append("---")
         return "\n".join(lines)
+
+    def run_walkthrough(example_idx, strategy_idx):
+        """Run a pre-configured walkthrough example end-to-end."""
+        if example_idx is None or strategy_idx is None:
+            return "Select an example and strategy to run."
+
+        example_idx = int(example_idx)
+        strategy_idx = int(strategy_idx)
+
+        if example_idx >= len(WALKTHROUGH_EXAMPLES):
+            return "Invalid example."
+
+        ex = WALKTHROUGH_EXAMPLES[example_idx]
+        if strategy_idx >= len(ex["strategies"]):
+            return "Invalid strategy."
+
+        strategy = ex["strategies"][strategy_idx]
+        os.environ['FINQA_TASK'] = ex["task"]
+
+        run_env = CostAwareFinqaEnvironment()
+        obs = run_env.reset()
+
+        # Find the target question
+        attempts = 0
+        while ex["question_match"].lower() not in obs.question.lower() and attempts < 250:
+            obs = run_env.reset()
+            attempts += 1
+
+        if attempts >= 250:
+            return f"Could not find question matching '{ex['question_match']}'. Try resetting."
+
+        lines = []
+        lines.append(f"## {ex['title']}")
+        lines.append(f"**Strategy: {strategy['name']}**\n")
+        lines.append(f"**Question:** {obs.question}\n")
+        lines.append(f"**Budget:** ${obs.budget_total:.2f} | **Task:** {ex['task']}\n")
+        lines.append("---\n")
+
+        for i, step in enumerate(strategy["steps"], 1):
+            action = CostAwareFinqaAction(
+                tool=step["tool"],
+                query=step["query"],
+                answer=step["answer"],
+            )
+            obs = run_env.step(action)
+
+            cost_str = f"${obs.tool_cost:.2f}" if obs.tool_cost > 0 else "FREE"
+            lines.append(f"### Step {i}: `{step['tool']}` ({cost_str})")
+
+            if step["tool"] == "submit_answer":
+                lines.append(f"**Submitted answer:** {step['answer']}\n")
+            elif step["query"]:
+                lines.append(f"```sql\n{step['query']}\n```\n")
+
+            # Show result
+            result_preview = obs.tool_result[:500]
+            if obs.error:
+                lines.append(f"**Error:** {obs.error}\n")
+            lines.append(f"```\n{result_preview}\n```\n")
+
+            lines.append(f"Budget remaining: ${obs.budget_remaining:.2f} | "
+                         f"Reward: {obs.reward:+.3f}\n")
+            lines.append("---\n")
+
+        # Final summary
+        if obs.done:
+            lines.append(f"## Final Score: **{obs.score:.3f}**\n")
+            lines.append(f"Total cost: ${obs.cost_so_far:.2f} / ${obs.budget_total:.2f}")
+
+        return "\n".join(lines)
+
+    def get_strategy_choices(example_idx):
+        """Get strategy names for the selected example."""
+        if example_idx is None:
+            return gr.update(choices=[], value=None)
+        idx = int(example_idx)
+        if idx >= len(WALKTHROUGH_EXAMPLES):
+            return gr.update(choices=[], value=None)
+        ex = WALKTHROUGH_EXAMPLES[idx]
+        choices = [(s["name"], str(i)) for i, s in enumerate(ex["strategies"])]
+        return gr.update(choices=choices, value="0")
+
+    def get_example_description(example_idx):
+        """Get description for the selected example."""
+        if example_idx is None:
+            return ""
+        idx = int(example_idx)
+        if idx >= len(WALKTHROUGH_EXAMPLES):
+            return ""
+        ex = WALKTHROUGH_EXAMPLES[idx]
+        return f"### {ex['title']}\n{ex['subtitle']}\n\n{ex['description']}"
 
     def reset_env(task_name):
         env._task_name = task_name
@@ -165,15 +360,85 @@ def create_gradio_app():
 
     with gr.Blocks(title="Cost-Aware FinQA") as demo:
 
+        gr.Markdown(
+            "# Cost-Aware FinQA Environment\n"
+            "An RL environment where agents learn to answer financial questions using the cheapest sufficient tool.\n"
+            "**Tools:** `sql_query` (FREE) | `vector_search` ($0.50) | "
+            "`web_search` ($3.00) | `upgrade_llm` ($3.00) | `submit_answer` (FREE)\n\n"
+            "**Scoring:** `correctness x cost_efficiency x (1 - error_penalty)` — "
+            "a correct answer with $0 cost scores 1.0; the same answer after spending $3 scores 0.7."
+        )
+
         with gr.Tabs():
-            # ===================== TAB 1: INTERACTIVE DEMO =====================
-            with gr.Tab("Interactive Demo"):
+            # ===================== TAB 1: WALKTHROUGH EXAMPLES =====================
+            with gr.Tab("Walkthrough Examples"):
                 gr.Markdown(
-                    "# Cost-Aware FinQA\n"
-                    "Answer financial questions by choosing tools strategically. "
-                    "Each tool has a different cost. Maximize correctness, minimize spending.\n\n"
-                    "**Tools:** `sql_query` (FREE) | `vector_search` ($0.50) | "
-                    "`web_search` ($3.00) | `upgrade_llm` ($3.00) | `submit_answer` (FREE)"
+                    "### Run pre-configured examples to see how tool choice affects scores\n"
+                    "Each example shows the same question answered with different strategies. "
+                    "Select an example, pick a strategy, and click **Run** to see the full execution trace."
+                )
+
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        example_dropdown = gr.Dropdown(
+                            choices=[(ex["title"], str(i)) for i, ex in enumerate(WALKTHROUGH_EXAMPLES)],
+                            value="0",
+                            label="Select Example",
+                        )
+                        strategy_dropdown = gr.Dropdown(
+                            choices=[(s["name"], str(i)) for i, s in enumerate(WALKTHROUGH_EXAMPLES[0]["strategies"])],
+                            value="0",
+                            label="Select Strategy",
+                        )
+                        run_btn = gr.Button("Run Walkthrough", variant="primary", size="lg")
+
+                    with gr.Column(scale=1):
+                        example_desc = gr.Markdown(
+                            value=f"### {WALKTHROUGH_EXAMPLES[0]['title']}\n"
+                                  f"{WALKTHROUGH_EXAMPLES[0]['subtitle']}\n\n"
+                                  f"{WALKTHROUGH_EXAMPLES[0]['description']}"
+                        )
+
+                walkthrough_output = gr.Markdown(
+                    value="Click **Run Walkthrough** to execute the selected example.",
+                    label="Execution Trace",
+                )
+
+                # Wire example selection
+                example_dropdown.change(
+                    fn=get_strategy_choices,
+                    inputs=[example_dropdown],
+                    outputs=[strategy_dropdown],
+                )
+                example_dropdown.change(
+                    fn=get_example_description,
+                    inputs=[example_dropdown],
+                    outputs=[example_desc],
+                )
+                run_btn.click(
+                    fn=run_walkthrough,
+                    inputs=[example_dropdown, strategy_dropdown],
+                    outputs=[walkthrough_output],
+                )
+
+                gr.Markdown(
+                    "---\n"
+                    "### Summary of Cost-Accuracy Trade-offs\n\n"
+                    "| Example | Smart Strategy | Score | Wasteful Strategy | Score | Lesson |\n"
+                    "|---------|---------------|-------|-------------------|-------|--------|\n"
+                    "| INTC: % of cash | SQL only | **1.000** | Web search | 0.700 | Free data in DB, don't pay for it |\n"
+                    "| ETR: Growth rate | SQL only | **1.000** | SQL + LLM upgrade | 0.800 | Simple math doesn't need $3 LLM |\n"
+                    "| INTC: Bad SQL | Clean SQL | **1.000** | 2 failed + 1 good | 0.700 | Error penalties stack up fast |\n"
+                    "| PNC: Home equity | Schema discovery + SQL | **1.000** | — | — | Use table_catalog to find tables |\n"
+                    "| AAL: Reorg costs | SQL only | **1.000** | SQL + web search | 0.700 | Core answer is in SQL |\n"
+                )
+
+            # ===================== TAB 2: INTERACTIVE PLAYGROUND =====================
+            with gr.Tab("Interactive Playground"):
+                gr.Markdown(
+                    "### Try it yourself\n"
+                    "Reset the environment, explore the schema, query data, and submit answers. "
+                    "Start with `SELECT * FROM table_catalog` to discover available tables."
                 )
 
                 with gr.Row():
@@ -229,16 +494,6 @@ def create_gradio_app():
                              tool_log_display, budget_display, step_display, score_display],
                 )
 
-            # ===================== TAB 2: EXAMPLES =====================
-            with gr.Tab("Tool Trade-off Examples"):
-                gr.Markdown(
-                    "# When to Use Each Tool\n"
-                    "These examples show the cost-accuracy trade-offs the agent needs to learn."
-                )
-                for ex in SAMPLE_EXAMPLES:
-                    with gr.Accordion(ex["title"], open=True):
-                        gr.Markdown(ex["description"])
-
             # ===================== TAB 3: DESIGN DOC =====================
             with gr.Tab("Design & Motivation"):
                 design_content = _load_design_doc()
@@ -248,9 +503,7 @@ def create_gradio_app():
 
 
 def mount_gradio(app):
-    """Mount Gradio app onto FastAPI at /web path."""
-    if os.environ.get("ENABLE_WEB_INTERFACE", "").lower() in ("true", "1", "yes"):
-        demo = create_gradio_app()
-        gr.mount_gradio_app(app, demo, path="/web")
-        return demo
-    return None
+    """Mount Gradio app onto FastAPI at root path."""
+    demo = create_gradio_app()
+    gr.mount_gradio_app(app, demo, path="/web")
+    return demo

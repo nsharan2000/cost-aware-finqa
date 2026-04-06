@@ -1,13 +1,12 @@
 ---
-title: Cost-Aware FinQA
+title: Cost-Aware FinQA Deep Research agent
 sdk: docker
 app_port: 8000
 tags:
   - openenv
 base_path: /web
 ---
-
-# Cost-Aware FinQA
+# Cost-Aware FinQA Deep research agent
 
 RL environment for cost-aware tool selection in financial question answering. See [DESIGN.md](DESIGN.md) for the full rationale and competition notes.
 
@@ -38,14 +37,15 @@ cost_aware_finqa/
 
 ```bash
 uv venv .venv && uv sync
-ENABLE_WEB_INTERFACE=true uvicorn server.app:app --port 8000
-# Visit http://localhost:8000/web
+uvicorn server.app:app --port 8000
+# Visit http://localhost:8000 (redirects to Gradio UI)
 ```
 
 Docker:
+
 ```bash
 docker build -t cost-aware-finqa -f server/Dockerfile .
-docker run -p 8000:8000 -e ENABLE_WEB_INTERFACE=true cost-aware-finqa
+docker run -p 8000:8000 cost-aware-finqa
 ```
 
 ## API
@@ -53,6 +53,7 @@ docker run -p 8000:8000 -e ENABLE_WEB_INTERFACE=true cost-aware-finqa
 **POST /reset** — Start a new episode. Returns question, table schema, budget.
 
 **POST /step** — Execute a tool:
+
 ```json
 {"action": {"tool": "sql_query", "query": "SELECT * FROM table_catalog LIMIT 5", "answer": ""}}
 ```
@@ -66,6 +67,7 @@ docker run -p 8000:8000 -e ENABLE_WEB_INTERFACE=true cost-aware-finqa
 ## Datastore
 
 SQLite database with:
+
 - `table_catalog` — index of all financial tables (use this to discover data)
 - `financials_<company>_<n>` — company financial data tables
 - `documents` — SEC filing text passages (company, year, section, content)
@@ -75,11 +77,11 @@ SQLite database with:
 
 ## Tasks
 
-| Task | Questions | Budget | Difficulty |
-|------|-----------|--------|-----------|
-| `basic_retrieval` | 70 | $10 | Easy — mostly SQL |
-| `analytical_reasoning` | 70 | $15 | Medium — SQL + vector |
-| `strategic_research` | 60 | $12 | Hard — all tools |
+| Task                     | Questions | Budget | Difficulty             |
+| ------------------------ | --------- | ------ | ---------------------- |
+| `basic_retrieval`      | 70        | $10    | Easy — mostly SQL     |
+| `analytical_reasoning` | 70        | $15    | Medium — SQL + vector |
+| `strategic_research`   | 60        | $12    | Hard — all tools      |
 
 Set via `FINQA_TASK` env var.
 
@@ -106,14 +108,13 @@ Outputs `[START]`/`[STEP]`/`[END]` format per competition spec.
 
 ## Env Vars
 
-| Variable | Required | Default |
-|----------|----------|---------|
-| `API_BASE_URL` | Yes | `https://router.huggingface.co/v1` |
-| `MODEL_NAME` | Yes | `Qwen/Qwen2.5-72B-Instruct` |
-| `HF_TOKEN` | Yes | — |
-| `SERPER_API_KEY` | No | Falls back to simulated search |
-| `FINQA_TASK` | No | `basic_retrieval` |
-| `ENABLE_WEB_INTERFACE` | No | `false` |
+| Variable                 | Required | Default                              |
+| ------------------------ | -------- | ------------------------------------ |
+| `API_BASE_URL`         | Yes      | `https://router.huggingface.co/v1` |
+| `MODEL_NAME`           | Yes      | `Qwen/Qwen2.5-72B-Instruct`        |
+| `HF_TOKEN`             | Yes      | —                                   |
+| `SERPER_API_KEY`       | No       | Falls back to simulated search       |
+| `FINQA_TASK`           | No       | `basic_retrieval`                  |
 
 ## Validation
 
