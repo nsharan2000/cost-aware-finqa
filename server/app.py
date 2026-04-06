@@ -7,7 +7,7 @@ Endpoints:
     - GET /state: Get current environment state
     - GET /schema: Get action/observation schemas
     - WS /ws: WebSocket endpoint for persistent sessions
-    - /web: Custom Gradio UI with walkthrough examples
+    - /: Custom Gradio UI with walkthrough examples
 """
 
 try:
@@ -24,7 +24,7 @@ except (ImportError, SystemError):
     from models import CostAwareFinqaAction, CostAwareFinqaObservation
     from server.cost_aware_finqa_environment import CostAwareFinqaEnvironment
 
-# Create the base API app (no default web interface)
+# Create the base API app (ENABLE_WEB_INTERFACE=false disables default playground)
 app = create_app(
     CostAwareFinqaEnvironment,
     CostAwareFinqaAction,
@@ -33,7 +33,7 @@ app = create_app(
     max_concurrent_envs=3,
 )
 
-# Mount custom Gradio UI and add root redirect
+# Mount custom Gradio UI at root (API routes take precedence)
 try:
     from .gradio_ui import mount_gradio
 except (ImportError, SystemError):
@@ -44,13 +44,6 @@ except (ImportError, SystemError):
 
 if mount_gradio:
     mount_gradio(app)
-
-    from starlette.responses import RedirectResponse
-
-    @app.get("/", include_in_schema=False)
-    async def root_redirect():
-        """Redirect root to Gradio UI."""
-        return RedirectResponse(url="/web/")
 
 
 def main(host: str = "0.0.0.0", port: int = 8000):

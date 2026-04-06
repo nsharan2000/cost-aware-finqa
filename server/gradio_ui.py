@@ -503,7 +503,7 @@ def create_gradio_app():
 
 
 def mount_gradio(app):
-    """Mount Gradio app onto FastAPI at root path."""
+    """Mount Gradio app onto FastAPI. API routes take precedence."""
     demo = create_gradio_app()
-    gr.mount_gradio_app(app, demo, path="/web")
+    gr.mount_gradio_app(app, demo, path="/")
     return demo
