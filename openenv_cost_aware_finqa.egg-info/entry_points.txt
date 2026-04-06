@@ -1,0 +1,2 @@
+[console_scripts]
+server = cost_aware_finqa.server.app:main
