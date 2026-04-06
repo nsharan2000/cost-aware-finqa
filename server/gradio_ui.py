@@ -494,7 +494,35 @@ def create_gradio_app():
                              tool_log_display, budget_display, step_display, score_display],
                 )
 
-            # ===================== TAB 3: DESIGN DOC =====================
+            # ===================== TAB 3: TRAINING =====================
+            with gr.Tab("Training Notebook"):
+                gr.Markdown(
+                    "## Train an Agent with Unsloth\n\n"
+                    "We provide a Google Colab notebook that trains a small LLM (Qwen 2.5-1.5B, 4-bit LoRA) "
+                    "to learn cost-aware tool selection using **Expert Iteration** (rejection sampling + SFT).\n\n"
+                    "### What the training covers\n\n"
+                    "| Phase | Description |\n"
+                    "|-------|-------------|\n"
+                    "| 1. Random baseline | Measure random tool selection performance |\n"
+                    "| 2. Pre-train baseline | Qwen 2.5-1.5B out-of-the-box |\n"
+                    "| 3. Expert Iteration | Best-of-N rejection sampling + SFT (3 rounds) |\n"
+                    "| 4. Post-train eval | Measure improvement across all 3 tasks |\n"
+                    "| 5. Comparison plots | Score, cost, and per-episode visualizations |\n\n"
+                    "### Key insight\n\n"
+                    "The trained agent learns to **prefer free SQL queries** over expensive tools "
+                    "($3 web search / LLM upgrade), improving scores while reducing costs.\n\n"
+                    "### Open the notebook\n\n"
+                    "[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)]"
+                    "(https://colab.research.google.com/github/nsharan2000/cost-aware-finqa/blob/main/Cost_Aware_FinQA_Training.ipynb)\n\n"
+                    "Or view the source: [Cost_Aware_FinQA_Training.ipynb on GitHub]"
+                    "(https://github.com/nsharan2000/cost-aware-finqa/blob/main/Cost_Aware_FinQA_Training.ipynb)\n\n"
+                    "### Requirements\n\n"
+                    "- Google Colab with **T4 GPU** (free tier works)\n"
+                    "- ~15 minutes for full training run\n"
+                    "- No API keys needed (uses local environment)\n"
+                )
+
+            # ===================== TAB 4: DESIGN DOC =====================
             with gr.Tab("Design & Motivation"):
                 design_content = _load_design_doc()
                 gr.Markdown(design_content)
@@ -503,7 +531,7 @@ def create_gradio_app():
 
 
 def mount_gradio(app):
-    """Mount Gradio app onto FastAPI at root path."""
+    """Mount Gradio app onto FastAPI. API routes take precedence."""
     demo = create_gradio_app()
-    gr.mount_gradio_app(app, demo, path="/web")
+    gr.mount_gradio_app(app, demo, path="/")
     return demo
