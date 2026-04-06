@@ -159,6 +159,10 @@ class CostAwareFinqaEnvironment(Environment):
         )
 
     def step(self, action: CostAwareFinqaAction) -> CostAwareFinqaObservation:
+        # Auto-reset if step is called on a fresh instance (HTTP endpoints are stateless)
+        if self._current_question is None:
+            self.reset()
+
         self._state.step_count += 1
         step_num = self._state.step_count
 
