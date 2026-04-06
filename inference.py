@@ -138,7 +138,7 @@ async def run_task(client: OpenAI, task_name: str, num_questions: int) -> List[f
             env = await CostAwareFinqaEnv.from_docker_image(IMAGE_NAME)
         else:
             env = await CostAwareFinqaEnv.from_space(
-                f"cost-aware-finqa",
+                "Teachafy/cost-aware-finqa",
                 hf_token=os.getenv("HF_TOKEN"),
             )
 
