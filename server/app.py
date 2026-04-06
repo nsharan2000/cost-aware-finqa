@@ -7,7 +7,7 @@ Endpoints:
     - GET /state: Get current environment state
     - GET /schema: Get action/observation schemas
     - WS /ws: WebSocket endpoint for persistent sessions
-    - /web: Gradio interactive demo (when ENABLE_WEB_INTERFACE=true)
+    - /web: Custom Gradio UI with walkthrough examples
 """
 
 try:
@@ -24,7 +24,7 @@ except (ImportError, SystemError):
     from models import CostAwareFinqaAction, CostAwareFinqaObservation
     from server.cost_aware_finqa_environment import CostAwareFinqaEnvironment
 
-# Create the app
+# Create the base API app (no default web interface)
 app = create_app(
     CostAwareFinqaEnvironment,
     CostAwareFinqaAction,
@@ -33,7 +33,7 @@ app = create_app(
     max_concurrent_envs=3,
 )
 
-# Mount Gradio web interface if enabled
+# Mount custom Gradio UI and add root redirect
 try:
     from .gradio_ui import mount_gradio
 except (ImportError, SystemError):
@@ -45,24 +45,16 @@ except (ImportError, SystemError):
 if mount_gradio:
     mount_gradio(app)
 
+    from starlette.responses import RedirectResponse
+
+    @app.get("/", include_in_schema=False)
+    async def root_redirect():
+        """Redirect root to Gradio UI."""
+        return RedirectResponse(url="/web/")
+
 
 def main(host: str = "0.0.0.0", port: int = 8000):
-    """
-    Entry point for direct execution via uv run or python -m.
-
-    This function enables running the server without Docker:
-        uv run --project . server
-        uv run --project . server --port 8001
-        python -m cost_aware_finqa.server.app
-
-    Args:
-        host: Host address to bind to (default: "0.0.0.0")
-        port: Port number to listen on (default: 8000)
-
-    For production deployments, consider using uvicorn directly with
-    multiple workers:
-        uvicorn cost_aware_finqa.server.app:app --workers 4
-    """
+    """Entry point for direct execution."""
     import uvicorn
 
     uvicorn.run(app, host=host, port=port)

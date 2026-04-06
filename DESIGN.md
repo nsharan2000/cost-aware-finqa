@@ -1,14 +1,12 @@
-# Cost-Aware FinQA: Why This Environment Matters
+# Cost-Aware FinQA Research: Why This Environment Matters
 
 ## The Idea
 
-Here's something that bugs me about how we build AI research agents today.
+Financial AI agents (in production) today have access to multiple tools — web search, database queries, APIs, stronger models — but they treat them all as interchangeable. A question like "What was Apple's revenue last year?" gets routed through a $3 web search when a free SQL query on the local database returns the same answer instantly.
 
-Every time an agent needs to answer a question, it has access to a bunch of tools — web search, database queries, APIs, maybe even a more expensive model for hard problems. And right now, most agents just... use whatever. There's no concept of "this costs money." A simple question like "What was Apple's revenue last year?" gets routed through a $3 web search when a free SQL query on a local database would give the same answer instantly.
+At scale, this adds up fast. A research session can burn $50+ in unnecessary API calls. The missing piece: agents don't learn *when a cheaper tool is sufficient*.
 
-In production, this matters. A lot. A single research session can rack up $50+ in API calls if the agent isn't smart about tool selection. Multiply that by thousands of queries and you're burning serious money on tools you didn't need.
-
-So I built an environment where the agent has to learn this the hard way.
+This environment fixes that. The agent gets a financial question, a budget, and 4 tools at different price points. It has to learn which tool fits which question type — and the scoring formula rewards efficiency alongside correctness.
 
 ## How It Works
 
@@ -25,7 +23,7 @@ So a perfect answer using only free tools gets ~1.0. A perfect answer that burne
 
 ## Why Each Tool Actually Matters
 
-This isn't a toy setup where I slapped 4 tools on for show. Each one has real utility:
+Each Tool has a varying amount of cost/compute that the agent has to account for when deciding its search strategy:
 
 **SQL is free but you have to write correct queries.** The data is real financial tables with messy column names like `percent_of_totaloperating_expenses`. Write wrong SQL and you get -0.15 per bad query. The agent has to learn the schema.
 
@@ -58,6 +56,7 @@ This means the agent gets signal throughout the episode. It can learn "oh, that 
 ## The Dataset
 
 200 questions curated from FinQA (EMNLP 2021), sourced from real SEC filings of 82 S&P 500 companies. Each question has:
+
 - A gold answer (195 numerical, 5 text)
 - A calculation program showing the reasoning steps
 - Associated financial tables loaded into SQLite
@@ -80,34 +79,37 @@ I'm not implementing that here because the rules require an interpretable enviro
 ## Sample Interactions
 
 ### Example 1: SQL is the smart choice
+
 **Question:** "What percentage of total cash and investments was available-for-sale investments in Dec 2012?"
 **Company:** INTC (Intel)
 
-| Strategy | Tools Used | Cost | Correctness | Final Score |
-|----------|-----------|------|-------------|-------------|
-| Smart | sql_query -> submit_answer | $0 | 1.0 | ~0.95 |
-| Wasteful | web_search -> submit_answer | $3 | 1.0 | ~0.65 |
+| Strategy | Tools Used                  | Cost | Correctness | Final Score |
+| -------- | --------------------------- | ---- | ----------- | ----------- |
+| Smart    | sql_query -> submit_answer  | $0   | 1.0         | ~0.95       |
+| Wasteful | web_search -> submit_answer | $3   | 1.0         | ~0.65       |
 
 The data is right there in the table: 14,001 / 26,302 = 0.532. No need to pay for a web search.
 
 ### Example 2: Vector search earns its cost
+
 **Question:** "What factors contributed to the change in operating expenses?"
 **Company:** ETR (Entergy)
 
-| Strategy | Tools Used | Cost | Correctness | Final Score |
-|----------|-----------|------|-------------|-------------|
-| Smart | vector_search -> submit_answer | $0.50 | 0.8 | ~0.75 |
-| Wrong tool | sql_query -> submit_answer | $0 | 0.0 | ~0.0 |
+| Strategy   | Tools Used                     | Cost  | Correctness | Final Score |
+| ---------- | ------------------------------ | ----- | ----------- | ----------- |
+| Smart      | vector_search -> submit_answer | $0.50 | 0.8         | ~0.75       |
+| Wrong tool | sql_query -> submit_answer     | $0    | 0.0         | ~0.0        |
 
 The answer lives in the narrative text, not the numbers. SQL returns nothing useful.
 
 ### Example 3: Web search is worth the money
+
 **Question:** "How does this debt-to-equity compare to the industry average?"
 **Company:** JPM (JPMorgan)
 
-| Strategy | Tools Used | Cost | Correctness | Final Score |
-|----------|-----------|------|-------------|-------------|
-| Smart | sql_query -> web_search -> submit_answer | $3 | 0.9 | ~0.60 |
-| Cheap but wrong | sql_query -> submit_answer | $0 | 0.2 | ~0.15 |
+| Strategy        | Tools Used                               | Cost | Correctness | Final Score |
+| --------------- | ---------------------------------------- | ---- | ----------- | ----------- |
+| Smart           | sql_query -> web_search -> submit_answer | $3   | 0.9         | ~0.60       |
+| Cheap but wrong | sql_query -> submit_answer               | $0   | 0.2         | ~0.15       |
 
 You need external industry data that isn't in JPMorgan's filing. Sometimes paying is the right call.
