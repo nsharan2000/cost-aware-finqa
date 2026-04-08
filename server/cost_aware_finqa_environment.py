@@ -7,14 +7,12 @@ correct answers and penalized for waste.
 
 Datastore:
 - financials_*: Company financial tables (income statements, balance sheets, etc.)
-- documents: SEC filing text passages organized by company/year
 - table_catalog: Index of all available financial tables
 
 Tools:
-- sql_query ($0): Query the datastore. Penalized for bad SQL.
-- vector_search ($0.50): Semantic search over filing text.
-- web_search ($3.00): External search via Serper API.
-- upgrade_llm ($3.00): Use a stronger model for reasoning.
+- sql_query ($0.001): Query the datastore. Penalized for bad SQL.
+- web_search ($0.02): External search via Serper API.
+- upgrade_llm ($1.00): Use a stronger model for reasoning. 1000x SQL cost — last resort.
 - submit_answer ($0): Submit final answer.
 """
 
@@ -33,14 +31,14 @@ except (ImportError, SystemError):
 
 try:
     from .tools import (
-        TOOL_COSTS, REDUNDANT_CALL_PENALTY,
-        execute_sql_query, execute_vector_search, execute_web_search,
+        TOOL_COSTS, REDUNDANT_CALL_PENALTY, SQL_QUERY_PENALTY, UPGRADE_LLM_PENALTY,
+        execute_sql_query, execute_web_search,
         execute_upgrade_llm, get_table_schema, grade_answer,
     )
 except (ImportError, SystemError):
     from server.tools import (
-        TOOL_COSTS, REDUNDANT_CALL_PENALTY,
-        execute_sql_query, execute_vector_search, execute_web_search,
+        TOOL_COSTS, REDUNDANT_CALL_PENALTY, SQL_QUERY_PENALTY, UPGRADE_LLM_PENALTY,
+        execute_sql_query, execute_web_search,
         execute_upgrade_llm, get_table_schema, grade_answer,
     )
 
@@ -137,9 +135,9 @@ class CostAwareFinqaEnvironment(Environment):
             task_name=self._task_name,
             tool_result=(
                 "Environment ready. You have access to a financial datastore with company "
-                "financial tables and SEC filing documents.\n\n"
-                "Available tools: sql_query (FREE), vector_search ($0.50), "
-                "web_search ($3.00), upgrade_llm ($3.00), submit_answer (FREE)\n\n"
+                "financial tables.\n\n"
+                "Available tools: sql_query ($0.001), "
+                "web_search ($0.02), upgrade_llm ($1.00 — last resort), submit_answer (FREE)\n\n"
                 "Tip: Start with sql_query to explore the data. "
                 "Use 'SELECT * FROM table_catalog' to discover available tables."
             ),
@@ -150,7 +148,7 @@ class CostAwareFinqaEnvironment(Environment):
             step_number=0,
             max_steps=self._max_steps,
             error="",
-            available_tools=["sql_query", "vector_search", "web_search", "upgrade_llm", "submit_answer"],
+            available_tools=["sql_query", "web_search", "upgrade_llm", "submit_answer"],
             table_schema=table_schema,
             score=0.0,
             cost_so_far=0.0,
@@ -175,7 +173,7 @@ class CostAwareFinqaEnvironment(Environment):
         tool_cost = 0.0
         done = False
 
-        valid_tools = ["sql_query", "vector_search", "web_search", "upgrade_llm", "submit_answer"]
+        valid_tools = ["sql_query", "web_search", "upgrade_llm", "submit_answer"]
 
         if tool not in valid_tools:
             error = f"Invalid tool '{tool}'. Use: {', '.join(valid_tools)}"
@@ -210,10 +208,7 @@ class CostAwareFinqaEnvironment(Environment):
                 if tool == "sql_query":
                     tool_result, bonus = execute_sql_query(query, fin_table)
                     step_reward += bonus
-
-                elif tool == "vector_search":
-                    tool_result, bonus = execute_vector_search(query, company=company, question_id=q_id)
-                    step_reward += bonus
+                    step_reward += SQL_QUERY_PENALTY  # Small penalty per SQL call
 
                 elif tool == "web_search":
                     tool_result, bonus = execute_web_search(query)
@@ -225,6 +220,7 @@ class CostAwareFinqaEnvironment(Environment):
                     ])
                     tool_result, bonus = execute_upgrade_llm(query, prev_context)
                     step_reward += bonus
+                    step_reward += UPGRADE_LLM_PENALTY  # Heavy penalty — last resort only
 
                 elif tool == "submit_answer":
                     self._answered = True

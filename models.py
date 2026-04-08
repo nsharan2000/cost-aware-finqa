@@ -1,7 +1,7 @@
 """
 Data models for the Cost-Aware FinQA Environment.
 
-The agent interacts with financial data using 4 tools (sql_query, vector_search,
+The agent interacts with financial data using 3 tools (sql_query,
 web_search, upgrade_llm) and submits answers. Each tool has a different cost.
 """
 
@@ -14,24 +14,34 @@ class CostAwareFinqaAction(Action):
     """Action the agent can take in the environment.
 
     Tools:
-        - sql_query: Run SQL against financial tables ($0, penalized for errors)
-        - vector_search: Semantic search over filing text ($0.50)
-        - web_search: External search via Serper API ($3.00)
-        - upgrade_llm: Use a stronger model for reasoning ($3.00)
-        - submit_answer: Submit final answer for grading
+        - sql_query ($0.001): Run SQL against financial tables. Penalized for errors.
+        - web_search ($0.02): External search via Serper API.
+        - upgrade_llm ($1.00): Use a stronger model for reasoning. 1000x SQL — last resort.
+        - submit_answer (FREE): Submit final answer for grading.
     """
 
     tool: str = Field(
         ...,
-        description="Tool to use: sql_query | vector_search | web_search | upgrade_llm | submit_answer"
+        description=(
+            "Tool to use: sql_query ($0.001) | web_search ($0.02) | upgrade_llm ($1.00) | submit_answer (FREE). "
+            "Example: sql_query"
+        ),
     )
     query: str = Field(
         default="",
-        description="SQL query string (for sql_query), search query (for vector_search/web_search), or reasoning prompt (for upgrade_llm)"
+        description=(
+            "For sql_query: a SELECT statement, e.g. SELECT * FROM table_catalog LIMIT 5. "
+            "For web_search: a search string, e.g. average P/E ratio tech sector. "
+            "For upgrade_llm: a reasoning prompt. "
+            "Leave empty for submit_answer."
+        ),
     )
     answer: str = Field(
         default="",
-        description="Final answer to submit (only used with submit_answer tool)"
+        description=(
+            "Your final numeric or text answer (only for submit_answer tool). "
+            "Example: 53.23"
+        ),
     )
 
 
@@ -49,7 +59,7 @@ class CostAwareFinqaObservation(Observation):
     max_steps: int = Field(default=8, description="Maximum steps allowed")
     error: str = Field(default="", description="Error message if tool call failed")
     available_tools: List[str] = Field(
-        default_factory=lambda: ["sql_query", "vector_search", "web_search", "upgrade_llm", "submit_answer"],
+        default_factory=lambda: ["sql_query", "web_search", "upgrade_llm", "submit_answer"],
         description="Tools available to the agent"
     )
     table_schema: str = Field(default="", description="SQL table schema hint for the current question")
