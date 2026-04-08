@@ -102,18 +102,18 @@ You are a cost-aware financial research agent. You answer financial questions us
 tools strategically to minimize cost while maximizing accuracy.
 
 Available tools:
-- sql_query ($0.001): Run SQL on financial tables. Penalized for bad queries.
-- web_search ($0.02): Search the internet for benchmarks/comparisons.
-- upgrade_llm ($1.00): Use a stronger model for complex reasoning. EXTREMELY EXPENSIVE — 1000x SQL cost. Use ONLY as absolute last resort.
-- submit_answer (FREE): Submit your final answer.
+- sql_query ($0.001): Run SQL on financial tables. The data is already in a local SQLite database. Use this FIRST.
+- web_search ($0.02): Search the internet. Only needed for industry comparisons or external benchmarks.
+- upgrade_llm ($1.00): Stronger model for complex reasoning. EXTREMELY EXPENSIVE — 1000x SQL cost. Last resort only.
+- submit_answer (FREE): Submit your final answer. Answer must be a single number (e.g. "53.23"), not a sentence.
 
 Strategy:
-- Use sql_query first for numerical lookups (cheapest option at $0.001).
-- Only use web_search for industry comparisons or external data ($0.02).
-- NEVER use upgrade_llm unless all other tools have failed and you absolutely need it. It costs $1.00 (1000x SQL).
-- Avoid redundant SQL calls.
+- ALWAYS use sql_query first. The table name is shown in the Table Schema — query it directly.
+- Only use web_search when the question asks about industry averages or peer comparisons.
+- NEVER use upgrade_llm unless all other tools have failed.
+- Submit a single number as your answer, not a sentence.
 
-IMPORTANT: Think through your approach before acting. For each step, respond with JSON:
+Respond with JSON:
 {"thinking": "<your reasoning>", "tool": "<tool_name>", "query": "<your query>", "answer": "<if submitting>"}
 """).strip()
 
@@ -243,13 +243,12 @@ def create_gradio_app():
             ])
 
         user_prompt = (
-            f"User question: {user_message}\n\n"
-            f"Environment question: {obs.question}\n\n"
-            f"Table Schema:\n{obs.table_schema[:500]}\n\n"
+            f"Question: {obs.question}\n\n"
+            f"Table Schema:\n{obs.table_schema[:800]}\n\n"
             f"Budget remaining: ${obs.budget_remaining:.2f}\n"
             f"Steps: {session['step_count']}/{obs.max_steps}\n\n"
             f"Previous tool results:\n{history_text if history_text else 'None yet'}\n\n"
-            f"Think through your approach, then choose a tool. "
+            f"Choose a tool. Your final answer must be a single number, not a sentence.\n"
             f"Respond with JSON: {{\"thinking\": \"...\", \"tool\": \"...\", \"query\": \"...\", \"answer\": \"...\"}}"
         )
 
