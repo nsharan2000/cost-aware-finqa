@@ -14,12 +14,20 @@ MANDATORY env vars (injected by validator):
 import asyncio
 import json
 import os
+import sys
 import textwrap
 from typing import List, Optional
 
 from openai import OpenAI
 
-from cost_aware_finqa import CostAwareFinqaAction, CostAwareFinqaEnv
+try:
+    from cost_aware_finqa import CostAwareFinqaAction, CostAwareFinqaEnv
+except ImportError:
+    # Fallback: when package-dir mapping doesn't install __init__.py correctly,
+    # import directly from the same directory as this script.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from models import CostAwareFinqaAction  # noqa: F811
+    from client import CostAwareFinqaEnv  # noqa: F811
 
 IMAGE_NAME = os.getenv("IMAGE_NAME")
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
