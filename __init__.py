@@ -1,10 +1,14 @@
 """Cost-Aware FinQA Environment."""
 
-from .client import CostAwareFinqaEnv
-from .models import CostAwareFinqaAction, CostAwareFinqaObservation
+try:
+    from .client import CostAwareFinqaEnv
+    from .models import CostAwareFinqaAction, CostAwareFinqaObservation
 
-__all__ = [
-    "CostAwareFinqaAction",
-    "CostAwareFinqaObservation",
-    "CostAwareFinqaEnv",
-]
+    __all__ = [
+        "CostAwareFinqaAction",
+        "CostAwareFinqaObservation",
+        "CostAwareFinqaEnv",
+    ]
+except ImportError:
+    # Allow direct imports when running outside the package
+    __all__ = []

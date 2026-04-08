@@ -13,12 +13,19 @@ Required env vars:
 import asyncio
 import json
 import os
+import sys
 import textwrap
 from typing import List, Optional
 
 from openai import OpenAI
 
-from cost_aware_finqa import CostAwareFinqaAction, CostAwareFinqaEnv
+# Support both installed package and direct execution from repo root
+try:
+    from cost_aware_finqa import CostAwareFinqaAction, CostAwareFinqaEnv
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from models import CostAwareFinqaAction
+    from client import CostAwareFinqaEnv
 
 IMAGE_NAME = os.getenv("IMAGE_NAME")
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
