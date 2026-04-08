@@ -48,7 +48,7 @@ def _load_design_doc():
 
 # 3 sample questions for the chat UI — one per difficulty level
 SAMPLE_QUESTIONS = [
-    "(Easy) What percentage of total cash and investments as of Dec 29, 2012 was comprised of available-for-sale investments? (Intel)",
+    "(Easy) In millions, between 2014 and 2013, what was the change in net derivative liabilities under bilateral agreements? (Goldman Sachs)",
     "(Medium) What is the growth rate in net revenue in 2008 for Entergy?",
     "(Hard) What percentage decrease occurred from 2011-2012 for deferred acquisition payments at IPG?",
 ]
