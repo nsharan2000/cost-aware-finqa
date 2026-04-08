@@ -235,6 +235,14 @@ def grade_answer(submitted: str, gold: str, question_id: str = "") -> Tuple[floa
 
         rel_error = abs(sub_num - gold_num) / abs(gold_num)
 
+        # Handle percentage vs decimal mismatch (e.g. 63.67 vs 0.63634)
+        if rel_error > 0.5 and gold_num != 0:
+            # Try dividing submitted by 100 (model gave percentage, gold is decimal)
+            alt_error_div = abs(sub_num / 100 - gold_num) / abs(gold_num)
+            # Try multiplying submitted by 100 (model gave decimal, gold is percentage)
+            alt_error_mul = abs(sub_num * 100 - gold_num) / abs(gold_num)
+            rel_error = min(rel_error, alt_error_div, alt_error_mul)
+
         if rel_error <= 0.01:
             return 1.0, f"Exact match (error={rel_error:.4f})"
         elif rel_error <= 0.05:
