@@ -46,11 +46,16 @@ def _load_design_doc():
     return "DESIGN.md not found."
 
 
-# 3 sample questions for the chat UI — one per difficulty level
-SAMPLE_QUESTIONS = [
-    "(Easy) In millions, between 2014 and 2013, what was the change in net derivative liabilities under bilateral agreements? (Goldman Sachs)",
-    "(Medium) What is the growth rate in net revenue in 2008 for Entergy?",
-    "(Hard) What percentage decrease occurred from 2011-2012 for deferred acquisition payments at IPG?",
+# Sample question button labels — clicking these starts a fresh episode for that task
+SAMPLE_LABELS = [
+    "Try Easy Question (Basic Retrieval)",
+    "Try Medium Question (Analytical Reasoning)",
+    "Try Hard Question (Strategic Research)",
+]
+SAMPLE_TASKS = [
+    "Easy Task (Basic Retrieval)",
+    "Medium Task (Analytical Reasoning)",
+    "Hard Task (Strategic Research)",
 ]
 
 
@@ -102,16 +107,16 @@ You are a cost-aware financial research agent. You answer financial questions us
 tools strategically to minimize cost while maximizing accuracy.
 
 Available tools:
-- sql_query ($0.001): Run SQL on financial tables. The data is already in a local SQLite database. Use this FIRST.
-- web_search ($0.02): Search the internet. Only needed for industry comparisons or external benchmarks.
-- upgrade_llm ($1.00): Stronger model for complex reasoning. EXTREMELY EXPENSIVE — 1000x SQL cost. Last resort only.
-- submit_answer (FREE): Submit your final answer. Answer must be a single number (e.g. "53.23"), not a sentence.
+- sql_query ($0.001): Run SQL on financial tables. Use this FIRST.
+- web_search ($0.02): Search the internet. Only for industry comparisons.
+- upgrade_llm ($1.00): EXTREMELY EXPENSIVE. Last resort only.
+- submit_answer (FREE): Submit your final answer as a single number.
 
-Strategy:
-- ALWAYS use sql_query first. The table name is shown in the Table Schema — query it directly.
-- Only use web_search when the question asks about industry averages or peer comparisons.
-- NEVER use upgrade_llm unless all other tools have failed.
-- Submit a single number as your answer, not a sentence.
+CRITICAL RULES:
+1. ALWAYS start with: SELECT * FROM "<table_name>" LIMIT 5  (use the EXACT table name from Table Schema)
+2. NEVER guess table names. ONLY use the table name shown in the Table Schema section.
+3. Look at the column names and data before computing anything.
+4. Your final answer must be a single number (e.g. "13588" or "0.53"), not a sentence.
 
 Respond with JSON:
 {"thinking": "<your reasoning>", "tool": "<tool_name>", "query": "<your query>", "answer": "<if submitting>"}
@@ -341,9 +346,12 @@ def create_gradio_app():
         )
 
     def use_sample_question(idx, chat_history, task_name):
-        """Handle clicking a sample question button."""
-        q = SAMPLE_QUESTIONS[idx]
-        return agent_step(q, chat_history, task_name)
+        """Handle clicking a sample question button — always starts a fresh episode."""
+        # Force reset with the correct task for this button
+        target_task = SAMPLE_TASKS[idx]
+        chat_history_new, tool_log_html, status = reset_session(target_task)
+        # Now run the agent on the freshly loaded question
+        return agent_step("Solve this question", chat_history_new, target_task)
 
     with gr.Blocks(
         title="Cost-Aware FinQA",
@@ -380,18 +388,18 @@ def create_gradio_app():
                             label="Agent Chat",
                         )
 
-                        gr.Markdown("**Sample questions:**")
+                        gr.Markdown("**Quick start — run the agent on a fresh question:**")
                         with gr.Row():
                             sample_btn_0 = gr.Button(
-                                SAMPLE_QUESTIONS[0][:70] + "...",
+                                SAMPLE_LABELS[0],
                                 size="sm", variant="secondary",
                             )
                             sample_btn_1 = gr.Button(
-                                SAMPLE_QUESTIONS[1][:70] + "...",
+                                SAMPLE_LABELS[1],
                                 size="sm", variant="secondary",
                             )
                             sample_btn_2 = gr.Button(
-                                SAMPLE_QUESTIONS[2][:70] + "...",
+                                SAMPLE_LABELS[2],
                                 size="sm", variant="secondary",
                             )
 

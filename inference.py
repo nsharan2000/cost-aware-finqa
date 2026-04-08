@@ -7,7 +7,8 @@ strategic_research). The agent uses an LLM to decide which tool to use at each s
 Required env vars:
     API_BASE_URL   The API endpoint for the LLM
     MODEL_NAME     The model identifier
-    HF_TOKEN       Your HuggingFace / API key
+    API_KEY        API key (preferred, used by validator)
+    HF_TOKEN       HuggingFace token (fallback)
 """
 
 import asyncio
@@ -28,7 +29,8 @@ except ImportError:
     from client import CostAwareFinqaEnv
 
 IMAGE_NAME = os.getenv("IMAGE_NAME")
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
+# Prioritize validator-injected API_KEY, fall back to HF_TOKEN for standalone use
+API_KEY = os.getenv("API_KEY") or os.getenv("HF_TOKEN")
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
 MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
 
