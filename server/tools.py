@@ -1,11 +1,10 @@
 """
 Tool implementations for the Cost-Aware FinQA Environment.
 
-4 tools with different costs:
-- sql_query: Free but penalized for errors
-- vector_search: $0.50 per call
-- web_search: $3.00 per call (uses Serper API)
-- upgrade_llm: $3.00 per call
+3 tools with different costs:
+- sql_query: $0.001 per call (cheap but penalized for errors)
+- web_search: $0.02 per call (uses Serper API)
+- upgrade_llm: $1.00 per call (1000x SQL — last resort only)
 """
 
 import json
@@ -16,19 +15,19 @@ from typing import Tuple
 import urllib.request
 
 
-# Tool costs
+# Tool costs — upgrade_llm is 1000x SQL, 50x web search
 TOOL_COSTS = {
-    "sql_query": 0.0,
-    "vector_search": 0.50,
-    "web_search": 3.00,
-    "upgrade_llm": 3.00,
+    "sql_query": 0.001,
+    "web_search": 0.02,
+    "upgrade_llm": 1.00,
     "submit_answer": 0.0,
 }
 
 SQL_ERROR_PENALTY = -0.15
-VALID_SQL_BONUS = 0.05
-VALID_VECTOR_BONUS = 0.05
+SQL_QUERY_PENALTY = -0.01  # Small penalty per SQL call to discourage excessive queries
+VALID_SQL_BONUS = 0.03
 VALID_WEB_BONUS = 0.02
+UPGRADE_LLM_PENALTY = -0.10  # Strong penalty — model must justify LLM upgrade as last resort
 REDUNDANT_CALL_PENALTY = -0.05
 
 
@@ -92,70 +91,6 @@ def execute_sql_query(query: str, table_hint: str = "") -> Tuple[str, float]:
         return f"SQL Error: {str(e)}", SQL_ERROR_PENALTY
     except Exception as e:
         return f"Error: {str(e)}", SQL_ERROR_PENALTY
-
-
-def execute_vector_search(query: str, company: str = "", question_id: str = "") -> Tuple[str, float]:
-    """Search the document store using keyword relevance.
-
-    Searches SEC filing text passages, optionally filtered by company.
-    """
-    db_path = get_db_path()
-    if not os.path.exists(db_path):
-        return "Error: Database not found", 0.0
-
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        # Search documents, optionally filtered by company
-        if company:
-            cursor.execute(
-                "SELECT company, fiscal_year, section, content FROM documents WHERE company = ?",
-                (company,)
-            )
-        elif question_id:
-            cursor.execute(
-                "SELECT company, fiscal_year, section, content FROM documents WHERE question_id = ?",
-                (question_id,)
-            )
-        else:
-            # Search all documents (limited)
-            cursor.execute(
-                "SELECT company, fiscal_year, section, content FROM documents LIMIT 500"
-            )
-
-        passages = cursor.fetchall()
-        conn.close()
-
-        if not passages:
-            return "No documents found. Try specifying a company ticker.", 0.0
-
-        # Keyword relevance scoring
-        query_terms = set(query.lower().split())
-        scored = []
-        for comp, year, section, content in passages:
-            content_lower = content.lower()
-            content_terms = set(content_lower.split())
-            overlap = len(query_terms & content_terms)
-            if query.lower() in content_lower:
-                overlap += 5
-            scored.append((overlap, comp, year, section, content))
-
-        scored.sort(reverse=True, key=lambda x: x[0])
-        top = scored[:5]
-
-        if top[0][0] == 0:
-            return "No relevant passages found. Try different search terms or specify a company.", 0.0
-
-        results = []
-        for score, comp, year, section, content in top:
-            if score > 0:
-                results.append(f"[{comp} {year} | {section}] (relevance: {score})\n{content[:300]}")
-
-        return "\n\n".join(results) if results else "No relevant results.", VALID_VECTOR_BONUS
-
-    except Exception as e:
-        return f"Error: {str(e)}", 0.0
 
 
 def execute_web_search(query: str) -> Tuple[str, float]:
@@ -303,11 +238,7 @@ def grade_answer(submitted: str, gold: str, question_id: str = "") -> Tuple[floa
         if rel_error <= 0.01:
             return 1.0, f"Exact match (error={rel_error:.4f})"
         elif rel_error <= 0.05:
-            return 0.8, f"Close (error={rel_error:.4f})"
-        elif rel_error <= 0.10:
-            return 0.6, f"Approximate (error={rel_error:.4f})"
-        elif rel_error <= 0.20:
-            return 0.3, f"Rough (error={rel_error:.4f})"
+            return 0.6, f"Close (error={rel_error:.4f})"
         else:
             return 0.0, f"Wrong (error={rel_error:.4f}, expected={gold_num}, got={sub_num})"
 

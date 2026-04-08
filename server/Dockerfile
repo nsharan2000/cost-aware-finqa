@@ -2,35 +2,30 @@ FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
-# Install system deps (cached layer)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl && \
     rm -rf /var/lib/apt/lists/*
 
-# Install uv (cached layer)
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     mv /root/.local/bin/uv /usr/local/bin/uv
 
-# Copy ONLY dependency files first (cache-friendly)
+# Copy dependency file first for cache-friendly builds
 COPY pyproject.toml /app/env/pyproject.toml
 
-# Create a minimal setup so uv can resolve deps without full code
 WORKDIR /app/env
-RUN mkdir -p server cost_aware_finqa && \
+RUN mkdir -p server && \
     touch __init__.py server/__init__.py && \
     uv venv .venv && \
     uv pip install -e "." --python .venv/bin/python 2>/dev/null || \
     uv pip install pydantic fastapi uvicorn gradio openenv-core --python .venv/bin/python
 
-# Now copy the actual code (only invalidates this layer on code changes)
+# Copy code (separate layer — changes don't invalidate dep install)
 COPY . /app/env/
 
-# ─── Final stage ───
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install curl for healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/env/.venv /app/.venv

@@ -1,0 +1,12 @@
+.venv
+__pycache__
+*.pyc
+.env
+.git
+.claude
+*.egg-info
+*.ipynb
+*.pdf
+.playwright-mcp
+.gitattributes
+data/curate_dataset.py

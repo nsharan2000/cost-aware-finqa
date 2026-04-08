@@ -1,11 +1,15 @@
 """
 Gradio frontend for the Cost-Aware FinQA Environment.
 
-Presentation-ready UI with runnable walkthrough examples
-that demonstrate cost-aware tool selection.
+Two-column layout:
+- Left: Agent Chat UI with tool-use display and thinking
+- Right: DESIGN.md rendered permanently
 """
 
+import json
 import os
+import textwrap
+import urllib.request
 
 import gradio as gr
 
@@ -18,6 +22,14 @@ try:
     from ..models import CostAwareFinqaAction
 except (ImportError, SystemError):
     from models import CostAwareFinqaAction
+
+# Display-friendly names for the task dropdown
+TASK_DISPLAY_NAMES = {
+    "Easy Task (Basic Retrieval)": "basic_retrieval",
+    "Medium Task (Analytical Reasoning)": "analytical_reasoning",
+    "Hard Task (Strategic Research)": "strategic_research",
+}
+TASK_DISPLAY_REVERSE = {v: k for k, v in TASK_DISPLAY_NAMES.items()}
 
 
 def _load_design_doc():
@@ -34,504 +46,445 @@ def _load_design_doc():
     return "DESIGN.md not found."
 
 
-# Pre-configured walkthrough examples with actual SQL queries that work against the datastore
-WALKTHROUGH_EXAMPLES = [
-    {
-        "id": "intc_smart",
-        "title": "1. SQL is free and sufficient (INTC)",
-        "subtitle": "Score: 1.000 vs 0.700 — saving $3 by using the right tool",
-        "question_match": "percentage of total cash",
-        "task": "basic_retrieval",
-        "description": (
-            "**Question:** What percentage of total cash and investments as of Dec 29, 2012 "
-            "was comprised of available-for-sale investments? (Intel)\n\n"
-            "The data is right there in the SQL table. No need to pay for a web search."
-        ),
-        "strategies": [
-            {
-                "name": "Smart: SQL only",
-                "steps": [
-                    {"tool": "sql_query", "query": "SELECT in_millions, dec_292012 FROM financials_intc_0", "answer": ""},
-                    {"tool": "submit_answer", "query": "", "answer": "0.53232"},
-                ],
-                "expected": "Score ~1.000 | Cost: $0 | 14,001 / 26,302 = 0.532",
-            },
-            {
-                "name": "Wasteful: Web search",
-                "steps": [
-                    {"tool": "web_search", "query": "Intel available-for-sale investments percentage 2012", "answer": ""},
-                    {"tool": "submit_answer", "query": "", "answer": "0.53232"},
-                ],
-                "expected": "Score ~0.700 | Cost: $3 | Same answer, 30% lower score",
-            },
-        ],
-    },
-    {
-        "id": "etr_growth",
-        "title": "2. Don't overspend on easy math (ETR)",
-        "subtitle": "Score: 1.000 vs 0.800 — LLM upgrade wastes $3 on simple arithmetic",
-        "question_match": "growth rate in net revenue",
-        "task": "analytical_reasoning",
-        "description": (
-            "**Question:** What is the growth rate in net revenue in 2008? (Entergy)\n\n"
-            "This is a two-step calculation: (959.2 - 991.1) / 991.1 = -0.032. "
-            "Simple enough for SQL + mental math. The $3 LLM upgrade is overkill."
-        ),
-        "strategies": [
-            {
-                "name": "Smart: SQL only",
-                "steps": [
-                    {"tool": "sql_query", "query": "SELECT metric, amount_in_millions FROM financials_etr_3 WHERE metric LIKE '%net revenue%'", "answer": ""},
-                    {"tool": "submit_answer", "query": "", "answer": "-0.03219"},
-                ],
-                "expected": "Score ~1.000 | Cost: $0 | Data right in the table",
-            },
-            {
-                "name": "Wasteful: SQL + LLM upgrade",
-                "steps": [
-                    {"tool": "sql_query", "query": "SELECT metric, amount_in_millions FROM financials_etr_3 WHERE metric LIKE '%net revenue%'", "answer": ""},
-                    {"tool": "upgrade_llm", "query": "Calculate growth rate: (959.2 - 991.1) / 991.1", "answer": ""},
-                    {"tool": "submit_answer", "query": "", "answer": "-0.03219"},
-                ],
-                "expected": "Score ~0.800 | Cost: $3 | Same answer, 20% lower score",
-            },
-        ],
-    },
-    {
-        "id": "intc_bad_sql",
-        "title": "3. Bad SQL queries destroy your score (INTC)",
-        "subtitle": "Score: 1.000 vs 0.700 — error penalties from failed queries",
-        "question_match": "percentage of total cash",
-        "task": "basic_retrieval",
-        "description": (
-            "**Question:** Same INTC question as Example 1, but with bad SQL attempts first.\n\n"
-            "Each failed SQL query adds a -0.15 penalty. Two bad queries = 0.30 error penalty. "
-            "Even with the correct final answer, your score drops from 1.0 to 0.7."
-        ),
-        "strategies": [
-            {
-                "name": "Clean: Correct SQL on first try",
-                "steps": [
-                    {"tool": "sql_query", "query": "SELECT in_millions, dec_292012 FROM financials_intc_0", "answer": ""},
-                    {"tool": "submit_answer", "query": "", "answer": "0.53232"},
-                ],
-                "expected": "Score ~1.000 | No penalties",
-            },
-            {
-                "name": "Sloppy: Two failed queries first",
-                "steps": [
-                    {"tool": "sql_query", "query": "SELECT * FROM intc_financials", "answer": ""},
-                    {"tool": "sql_query", "query": "SELECT revenue FROM financials_intc_0", "answer": ""},
-                    {"tool": "sql_query", "query": "SELECT in_millions, dec_292012 FROM financials_intc_0", "answer": ""},
-                    {"tool": "submit_answer", "query": "", "answer": "0.53232"},
-                ],
-                "expected": "Score ~0.700 | Two -0.15 penalties = 0.30 error penalty",
-            },
-        ],
-    },
-    {
-        "id": "pnc_sum",
-        "title": "4. Explore the schema, then query (PNC)",
-        "subtitle": "Score: 1.000 — using table_catalog to discover the right table",
-        "question_match": "total of home equity",
-        "task": "basic_retrieval",
-        "description": (
-            "**Question:** In millions, what is the total of home equity lines of credit? (PNC)\n\n"
-            "A smart agent starts with `SELECT * FROM table_catalog` to discover available tables, "
-            "then queries the right one. This mirrors how a real analyst would work."
-        ),
-        "strategies": [
-            {
-                "name": "Smart: Discover schema, then query",
-                "steps": [
-                    {"tool": "sql_query", "query": "SELECT * FROM table_catalog WHERE company = 'PNC'", "answer": ""},
-                    {"tool": "sql_query", "query": "SELECT * FROM financials_pnc_0", "answer": ""},
-                    {"tool": "submit_answer", "query": "", "answer": "22929"},
-                ],
-                "expected": "Score ~1.000 | Cost: $0 | 15,553 + 7,376 = 22,929",
-            },
-        ],
-    },
-    {
-        "id": "aal_web",
-        "title": "5. When web search is justified (AAL)",
-        "subtitle": "Industry comparison needs external data — but the core answer is in SQL",
-        "question_match": "labor-related deemed claim",
-        "task": "basic_retrieval",
-        "description": (
-            "**Question:** What was the percent of labor-related deemed claim to total reorganization costs? "
-            "How does this compare to the market capitalization benchmark? (American Airlines)\n\n"
-            "The ratio (1733/2655 = 0.653) is in SQL. The benchmark comparison part needs web search. "
-            "But the gold answer is the ratio — so SQL alone scores perfectly here."
-        ),
-        "strategies": [
-            {
-                "name": "Efficient: SQL is enough for the core answer",
-                "steps": [
-                    {"tool": "sql_query", "query": "SELECT metric, col_2013 FROM financials_aal_5", "answer": ""},
-                    {"tool": "submit_answer", "query": "", "answer": "0.65273"},
-                ],
-                "expected": "Score ~1.000 | Cost: $0 | 1,733 / 2,655 = 0.653",
-            },
-            {
-                "name": "Cautious: SQL + web search for benchmark context",
-                "steps": [
-                    {"tool": "sql_query", "query": "SELECT metric, col_2013 FROM financials_aal_5", "answer": ""},
-                    {"tool": "web_search", "query": "airline reorganization costs industry benchmark", "answer": ""},
-                    {"tool": "submit_answer", "query": "", "answer": "0.65273"},
-                ],
-                "expected": "Score ~0.700 | Cost: $3 | Benchmark context but lower score",
-            },
-        ],
-    },
+# 3 sample questions for the chat UI — one per difficulty level
+SAMPLE_QUESTIONS = [
+    "(Easy) What percentage of total cash and investments as of Dec 29, 2012 was comprised of available-for-sale investments? (Intel)",
+    "(Medium) What is the growth rate in net revenue in 2008 for Entergy?",
+    "(Hard) What percentage decrease occurred from 2011-2012 for deferred acquisition payments at IPG?",
 ]
 
 
+def _get_hf_token() -> str:
+    """Get HF token from environment, .env file, or HF Space secrets."""
+    token = os.environ.get("HF_TOKEN", "")
+    if token:
+        return token
+    # Fallback: try .env file in project root
+    env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+    if os.path.exists(env_path):
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("HF_TOKEN="):
+                    return line.split("=", 1)[1].strip().strip("'\"")
+    return ""
+
+
+def _call_hf_inference(messages: list, hf_token: str) -> str:
+    """Call HF Inference API for the agent chat."""
+    api_url = "https://router.huggingface.co/v1/chat/completions"
+    model = os.environ.get("CHAT_MODEL", "Qwen/Qwen2.5-72B-Instruct")
+
+    payload = json.dumps({
+        "model": model,
+        "messages": messages,
+        "temperature": 0.3,
+        "max_tokens": 800,
+    })
+    req = urllib.request.Request(
+        api_url,
+        data=payload.encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {hf_token}",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode())
+        return data["choices"][0]["message"]["content"]
+    except Exception as e:
+        return f"Error calling HF API: {e}"
+
+
+AGENT_SYSTEM_PROMPT = textwrap.dedent("""\
+You are a cost-aware financial research agent. You answer financial questions using
+tools strategically to minimize cost while maximizing accuracy.
+
+Available tools:
+- sql_query ($0.001): Run SQL on financial tables. Penalized for bad queries.
+- web_search ($0.02): Search the internet for benchmarks/comparisons.
+- upgrade_llm ($1.00): Use a stronger model for complex reasoning. EXTREMELY EXPENSIVE — 1000x SQL cost. Use ONLY as absolute last resort.
+- submit_answer (FREE): Submit your final answer.
+
+Strategy:
+- Use sql_query first for numerical lookups (cheapest option at $0.001).
+- Only use web_search for industry comparisons or external data ($0.02).
+- NEVER use upgrade_llm unless all other tools have failed and you absolutely need it. It costs $1.00 (1000x SQL).
+- Avoid redundant SQL calls.
+
+IMPORTANT: Think through your approach before acting. For each step, respond with JSON:
+{"thinking": "<your reasoning>", "tool": "<tool_name>", "query": "<your query>", "answer": "<if submitting>"}
+""").strip()
+
+
 def create_gradio_app():
-    """Create the Gradio interface."""
+    """Create the Gradio interface with Agent Chat + permanent DESIGN.md."""
 
     env = CostAwareFinqaEnvironment()
-    current_obs = {"obs": None}
-    tool_log = {"entries": []}
+    session = {
+        "obs": None,
+        "history": [],
+        "chat_messages": [],
+        "tool_log": [],
+        "step_count": 0,
+        "done": False,
+    }
 
-    def format_tool_log(entries):
-        if not entries:
-            return "No tool calls yet. Reset the environment to start."
+    def format_tool_log_html(tool_log):
+        if not tool_log:
+            return "<i>No tool calls yet.</i>"
         lines = []
-        for i, e in enumerate(entries, 1):
-            cost_str = f"${e['cost']:.2f}" if e['cost'] > 0 else "FREE"
+        for i, e in enumerate(tool_log, 1):
+            cost_str = f"${e['cost']:.4f}" if e['cost'] > 0 else "FREE"
             reward_str = f"{e['reward']:+.3f}" if e['reward'] != 0 else "0.000"
+            color = "#22c55e" if e['reward'] > 0 else "#ef4444" if e['reward'] < 0 else "#6b7280"
             lines.append(
-                f"**Step {i}** | Tool: `{e['tool']}` | Cost: {cost_str} | Reward: {reward_str}\n"
-                f"Query: {e['query'][:120]}\n"
-                f"Result: {e['result'][:250]}"
+                f"<div style='margin:4px 0;padding:6px 10px;background:#1e1e2e;border-left:3px solid {color};border-radius:4px;font-size:13px;color:#e0e0e0;'>"
+                f"<b>Step {i}</b> &mdash; <code style='color:#ccc;'>{e['tool']}</code> ({cost_str}) "
+                f"<span style='color:{color};font-weight:600;'>[{reward_str}]</span><br>"
+                f"<span style='color:#aaa;'>{e['query'][:120]}</span>"
+                f"</div>"
             )
-            if e.get('error'):
-                lines.append(f"Error: {e['error']}")
-            lines.append("---")
-        return "\n".join(lines)
+        return "".join(lines)
 
-    def run_walkthrough(example_idx, strategy_idx):
-        """Run a pre-configured walkthrough example end-to-end."""
-        if example_idx is None or strategy_idx is None:
-            return "Select an example and strategy to run."
-
-        example_idx = int(example_idx)
-        strategy_idx = int(strategy_idx)
-
-        if example_idx >= len(WALKTHROUGH_EXAMPLES):
-            return "Invalid example."
-
-        ex = WALKTHROUGH_EXAMPLES[example_idx]
-        if strategy_idx >= len(ex["strategies"]):
-            return "Invalid strategy."
-
-        strategy = ex["strategies"][strategy_idx]
-        os.environ['FINQA_TASK'] = ex["task"]
-
-        run_env = CostAwareFinqaEnvironment()
-        obs = run_env.reset()
-
-        # Find the target question
-        attempts = 0
-        while ex["question_match"].lower() not in obs.question.lower() and attempts < 250:
-            obs = run_env.reset()
-            attempts += 1
-
-        if attempts >= 250:
-            return f"Could not find question matching '{ex['question_match']}'. Try resetting."
-
-        lines = []
-        lines.append(f"## {ex['title']}")
-        lines.append(f"**Strategy: {strategy['name']}**\n")
-        lines.append(f"**Question:** {obs.question}\n")
-        lines.append(f"**Budget:** ${obs.budget_total:.2f} | **Task:** {ex['task']}\n")
-        lines.append("---\n")
-
-        for i, step in enumerate(strategy["steps"], 1):
-            action = CostAwareFinqaAction(
-                tool=step["tool"],
-                query=step["query"],
-                answer=step["answer"],
-            )
-            obs = run_env.step(action)
-
-            cost_str = f"${obs.tool_cost:.2f}" if obs.tool_cost > 0 else "FREE"
-            lines.append(f"### Step {i}: `{step['tool']}` ({cost_str})")
-
-            if step["tool"] == "submit_answer":
-                lines.append(f"**Submitted answer:** {step['answer']}\n")
-            elif step["query"]:
-                lines.append(f"```sql\n{step['query']}\n```\n")
-
-            # Show result
-            result_preview = obs.tool_result[:500]
-            if obs.error:
-                lines.append(f"**Error:** {obs.error}\n")
-            lines.append(f"```\n{result_preview}\n```\n")
-
-            lines.append(f"Budget remaining: ${obs.budget_remaining:.2f} | "
-                         f"Reward: {obs.reward:+.3f}\n")
-            lines.append("---\n")
-
-        # Final summary
-        if obs.done:
-            lines.append(f"## Final Score: **{obs.score:.3f}**\n")
-            lines.append(f"Total cost: ${obs.cost_so_far:.2f} / ${obs.budget_total:.2f}")
-
-        return "\n".join(lines)
-
-    def get_strategy_choices(example_idx):
-        """Get strategy names for the selected example."""
-        if example_idx is None:
-            return gr.update(choices=[], value=None)
-        idx = int(example_idx)
-        if idx >= len(WALKTHROUGH_EXAMPLES):
-            return gr.update(choices=[], value=None)
-        ex = WALKTHROUGH_EXAMPLES[idx]
-        choices = [(s["name"], str(i)) for i, s in enumerate(ex["strategies"])]
-        return gr.update(choices=choices, value="0")
-
-    def get_example_description(example_idx):
-        """Get description for the selected example."""
-        if example_idx is None:
-            return ""
-        idx = int(example_idx)
-        if idx >= len(WALKTHROUGH_EXAMPLES):
-            return ""
-        ex = WALKTHROUGH_EXAMPLES[idx]
-        return f"### {ex['title']}\n{ex['subtitle']}\n\n{ex['description']}"
-
-    def reset_env(task_name):
+    def reset_session(task_name):
+        # Map display name to internal task name
+        task_name = TASK_DISPLAY_NAMES.get(task_name, task_name)
         env._task_name = task_name
         obs = env.reset()
-        current_obs["obs"] = obs
-        tool_log["entries"] = []
+        session["obs"] = obs
+        session["history"] = []
+        session["chat_messages"] = []
+        session["tool_log"] = []
+        session["step_count"] = 0
+        session["done"] = False
+
+        welcome = (
+            f"**New episode started!**\n\n"
+            f"**Task:** {obs.task_name} | **Budget:** ${obs.budget_total:.2f} | "
+            f"**Max Steps:** {obs.max_steps}\n\n"
+            f"**Question:** {obs.question}\n\n"
+            f"**Table Schema:**\n```\n{obs.table_schema[:400]}\n```\n\n"
+            f"Ask me to solve this, or type your own financial question!"
+        )
+        return (
+            [{"role": "assistant", "content": welcome}],
+            format_tool_log_html([]),
+            f"Budget: ${obs.budget_remaining:.2f} / ${obs.budget_total:.2f} | Steps: 0/{obs.max_steps} | Score: 0.000",
+        )
+
+    def _parse_agent_response(text):
+        """Parse agent JSON response, extracting thinking and tool call."""
+        text = text.strip()
+        thinking = ""
+        tool_call = None
+
+        # Try to extract JSON
+        if "{" in text:
+            start = text.index("{")
+            end = text.rindex("}") + 1
+            try:
+                parsed = json.loads(text[start:end])
+                thinking = parsed.get("thinking", "")
+                tool_call = {
+                    "tool": parsed.get("tool", "submit_answer"),
+                    "query": parsed.get("query", ""),
+                    "answer": parsed.get("answer", ""),
+                }
+            except json.JSONDecodeError:
+                pass
+
+        if not tool_call:
+            tool_call = {"tool": "submit_answer", "query": "", "answer": text}
+
+        return thinking, tool_call
+
+    def agent_step(user_message, chat_history, task_name):
+        """Run one agent interaction: user asks, agent thinks + uses tools + responds."""
+        # Map display name to internal task name
+        task_name = TASK_DISPLAY_NAMES.get(task_name, task_name)
+        if session["obs"] is None or session["done"]:
+            # Auto-reset if needed
+            env._task_name = task_name
+            obs = env.reset()
+            session["obs"] = obs
+            session["history"] = []
+            session["tool_log"] = []
+            session["step_count"] = 0
+            session["done"] = False
+
+        if chat_history is None:
+            chat_history = []
+
+        obs = session["obs"]
+        hf_token = _get_hf_token()
+
+        if not hf_token:
+            chat_history.append({"role": "user", "content": user_message})
+            chat_history.append({"role": "assistant", "content": (
+                "**HF_TOKEN not configured.** The Agent Chat requires a Hugging Face API token.\n\n"
+                "- **HF Space:** Set `HF_TOKEN` as a Space secret in Settings.\n"
+                "- **Local:** `export HF_TOKEN=hf_...` or add `HF_TOKEN=hf_...` to `.env`\n\n"
+                "You can still use the **Playground** tab to interact with the environment directly (Reset/Step/State)."
+            )})
+            return (
+                chat_history,
+                format_tool_log_html(session["tool_log"]),
+                f"Budget: ${obs.budget_remaining:.2f} / ${obs.budget_total:.2f} | Steps: {session['step_count']}/{obs.max_steps} | Score: {obs.score:.3f}",
+            )
+
+        # Build context for the agent
+        history_text = ""
+        if session["history"]:
+            history_text = "\n".join([
+                f"Step {h['step']}: {h['tool']} -> {h['result'][:200]}"
+                for h in session["history"][-4:]
+            ])
+
+        user_prompt = (
+            f"User question: {user_message}\n\n"
+            f"Environment question: {obs.question}\n\n"
+            f"Table Schema:\n{obs.table_schema[:500]}\n\n"
+            f"Budget remaining: ${obs.budget_remaining:.2f}\n"
+            f"Steps: {session['step_count']}/{obs.max_steps}\n\n"
+            f"Previous tool results:\n{history_text if history_text else 'None yet'}\n\n"
+            f"Think through your approach, then choose a tool. "
+            f"Respond with JSON: {{\"thinking\": \"...\", \"tool\": \"...\", \"query\": \"...\", \"answer\": \"...\"}}"
+        )
+
+        messages = [
+            {"role": "system", "content": AGENT_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        # Run the agent loop (up to remaining steps)
+        full_response_parts = []
+        max_agent_steps = min(6, obs.max_steps - session["step_count"])
+
+        for _ in range(max_agent_steps):
+            if session["done"]:
+                break
+
+            llm_response = _call_hf_inference(messages, hf_token)
+            thinking, tool_call = _parse_agent_response(llm_response)
+
+            # Show thinking
+            if thinking:
+                full_response_parts.append(f"**Thinking:** {thinking}\n")
+
+            tool = tool_call["tool"]
+            query = tool_call["query"]
+            answer = tool_call["answer"]
+
+            full_response_parts.append(
+                f"**Tool:** `{tool}` | "
+                f"{'Query: `' + query[:80] + '`' if query else 'Answer: `' + answer[:80] + '`'}\n"
+            )
+
+            # Execute the tool
+            action = CostAwareFinqaAction(tool=tool, query=query, answer=answer)
+            obs = env.step(action)
+            session["obs"] = obs
+            session["step_count"] += 1
+
+            # Log the tool call
+            session["tool_log"].append({
+                "tool": tool,
+                "query": query if tool != "submit_answer" else f"Answer: {answer}",
+                "result": obs.tool_result,
+                "cost": obs.tool_cost,
+                "reward": obs.reward,
+                "error": obs.error,
+            })
+            session["history"].append({
+                "step": session["step_count"],
+                "tool": tool,
+                "result": obs.tool_result[:200],
+            })
+
+            # Show result
+            result_preview = obs.tool_result[:300]
+            if obs.error:
+                full_response_parts.append(f"**Error:** {obs.error}\n")
+            full_response_parts.append(f"```\n{result_preview}\n```\n")
+
+            if obs.done:
+                session["done"] = True
+                full_response_parts.append(
+                    f"\n**Episode Complete!** Final Score: **{obs.score:.3f}** | "
+                    f"Total Cost: ${obs.cost_so_far:.2f}\n"
+                )
+                break
+
+            # Add result to messages for next iteration
+            messages.append({"role": "assistant", "content": llm_response})
+            messages.append({"role": "user", "content": (
+                f"Tool result:\n{obs.tool_result[:400]}\n\n"
+                f"Budget remaining: ${obs.budget_remaining:.2f} | Step {session['step_count']}/{obs.max_steps}\n"
+                f"Continue. Respond with JSON: {{\"thinking\": \"...\", \"tool\": \"...\", \"query\": \"...\", \"answer\": \"...\"}}"
+            )})
+
+        response = "\n".join(full_response_parts)
+        chat_history.append({"role": "user", "content": user_message})
+        chat_history.append({"role": "assistant", "content": response})
 
         status = (
-            f"**Task:** {obs.task_name}\n"
-            f"**Budget:** ${obs.budget_total:.2f}\n"
-            f"**Max Steps:** {obs.max_steps}\n"
-            f"**Question:** {obs.question}"
+            f"Budget: ${obs.budget_remaining:.2f} / ${obs.budget_total:.2f} | "
+            f"Steps: {session['step_count']}/{obs.max_steps} | "
+            f"Score: {obs.score:.3f}"
         )
 
         return (
-            status, obs.question, obs.table_schema,
-            format_tool_log([]),
-            f"${obs.budget_remaining:.2f} / ${obs.budget_total:.2f}",
-            "0", "0.000",
+            chat_history,
+            format_tool_log_html(session["tool_log"]),
+            status,
         )
 
-    def execute_tool(tool, query, answer):
-        if current_obs["obs"] is None:
-            return ("Reset the environment first.", "", "", "", "", "", "")
+    def use_sample_question(idx, chat_history, task_name):
+        """Handle clicking a sample question button."""
+        q = SAMPLE_QUESTIONS[idx]
+        return agent_step(q, chat_history, task_name)
 
-        action = CostAwareFinqaAction(tool=tool, query=query, answer=answer)
-        obs = env.step(action)
-        current_obs["obs"] = obs
-
-        entry = {
-            "tool": tool,
-            "query": query if tool != "submit_answer" else f"Answer: {answer}",
-            "result": obs.tool_result,
-            "cost": obs.tool_cost,
-            "reward": obs.reward,
-            "error": obs.error,
-        }
-        tool_log["entries"].append(entry)
-
-        status = ""
-        if obs.done:
-            status = f"**EPISODE COMPLETE** | Final Score: **{obs.score:.3f}**\n\n"
-            if obs.score >= 0.7:
-                status += "Great result - correct and cost-efficient!"
-            elif obs.score >= 0.3:
-                status += "Decent - room to improve on cost or accuracy."
-            else:
-                status += "Low score - try different tools or fix SQL queries."
-
-        return (
-            status if status else f"Step {obs.step_number}/{obs.max_steps}",
-            obs.question, obs.tool_result[:500],
-            format_tool_log(tool_log["entries"]),
-            f"${obs.budget_remaining:.2f} / ${obs.budget_total:.2f}",
-            str(obs.step_number), f"{obs.score:.3f}",
-        )
-
-    with gr.Blocks(title="Cost-Aware FinQA") as demo:
+    with gr.Blocks(
+        title="Cost-Aware FinQA",
+    ) as demo:
 
         gr.Markdown(
-            "# Cost-Aware FinQA Environment\n"
+            "# Cost-Aware FinQA Research Agent\n"
             "An RL environment where agents learn to answer financial questions using the cheapest sufficient tool.\n"
-            "**Tools:** `sql_query` (FREE) | `vector_search` ($0.50) | "
-            "`web_search` ($3.00) | `upgrade_llm` ($3.00) | `submit_answer` (FREE)\n\n"
-            "**Scoring:** `correctness x cost_efficiency x (1 - error_penalty)` — "
-            "a correct answer with $0 cost scores 1.0; the same answer after spending $3 scores 0.7."
+            "**Scoring:** `correctness x cost_efficiency x (1 - error_penalty)`"
         )
 
-        with gr.Tabs():
-            # ===================== TAB 1: WALKTHROUGH EXAMPLES =====================
-            with gr.Tab("Walkthrough Examples"):
-                gr.Markdown(
-                    "### Run pre-configured examples to see how tool choice affects scores\n"
-                    "Each example shows the same question answered with different strategies. "
-                    "Select an example, pick a strategy, and click **Run** to see the full execution trace."
-                )
+        with gr.Row():
+            # =================== LEFT COLUMN: Agent Chat ===================
+            with gr.Column(scale=3):
+                with gr.Tabs():
+                    with gr.Tab("Agent Chat"):
+                        with gr.Row():
+                            task_dropdown = gr.Dropdown(
+                                choices=list(TASK_DISPLAY_NAMES.keys()),
+                                value="Easy Task (Basic Retrieval)",
+                                label="Task",
+                                scale=2,
+                            )
+                            reset_btn = gr.Button("New Episode", variant="primary", scale=1)
 
-                with gr.Row():
-                    with gr.Column(scale=1):
-                        example_dropdown = gr.Dropdown(
-                            choices=[(ex["title"], str(i)) for i, ex in enumerate(WALKTHROUGH_EXAMPLES)],
-                            value="0",
-                            label="Select Example",
-                        )
-                        strategy_dropdown = gr.Dropdown(
-                            choices=[(s["name"], str(i)) for i, s in enumerate(WALKTHROUGH_EXAMPLES[0]["strategies"])],
-                            value="0",
-                            label="Select Strategy",
-                        )
-                        run_btn = gr.Button("Run Walkthrough", variant="primary", size="lg")
-
-                    with gr.Column(scale=1):
-                        example_desc = gr.Markdown(
-                            value=f"### {WALKTHROUGH_EXAMPLES[0]['title']}\n"
-                                  f"{WALKTHROUGH_EXAMPLES[0]['subtitle']}\n\n"
-                                  f"{WALKTHROUGH_EXAMPLES[0]['description']}"
+                        status_bar = gr.Markdown(
+                            value="Click **New Episode** to start.",
+                            elem_classes=["status-bar"],
                         )
 
-                walkthrough_output = gr.Markdown(
-                    value="Click **Run Walkthrough** to execute the selected example.",
-                    label="Execution Trace",
-                )
-
-                # Wire example selection
-                example_dropdown.change(
-                    fn=get_strategy_choices,
-                    inputs=[example_dropdown],
-                    outputs=[strategy_dropdown],
-                )
-                example_dropdown.change(
-                    fn=get_example_description,
-                    inputs=[example_dropdown],
-                    outputs=[example_desc],
-                )
-                run_btn.click(
-                    fn=run_walkthrough,
-                    inputs=[example_dropdown, strategy_dropdown],
-                    outputs=[walkthrough_output],
-                )
-
-                gr.Markdown(
-                    "---\n"
-                    "### Summary of Cost-Accuracy Trade-offs\n\n"
-                    "| Example | Smart Strategy | Score | Wasteful Strategy | Score | Lesson |\n"
-                    "|---------|---------------|-------|-------------------|-------|--------|\n"
-                    "| INTC: % of cash | SQL only | **1.000** | Web search | 0.700 | Free data in DB, don't pay for it |\n"
-                    "| ETR: Growth rate | SQL only | **1.000** | SQL + LLM upgrade | 0.800 | Simple math doesn't need $3 LLM |\n"
-                    "| INTC: Bad SQL | Clean SQL | **1.000** | 2 failed + 1 good | 0.700 | Error penalties stack up fast |\n"
-                    "| PNC: Home equity | Schema discovery + SQL | **1.000** | — | — | Use table_catalog to find tables |\n"
-                    "| AAL: Reorg costs | SQL only | **1.000** | SQL + web search | 0.700 | Core answer is in SQL |\n"
-                )
-
-            # ===================== TAB 2: INTERACTIVE PLAYGROUND =====================
-            with gr.Tab("Interactive Playground"):
-                gr.Markdown(
-                    "### Try it yourself\n"
-                    "Reset the environment, explore the schema, query data, and submit answers. "
-                    "Start with `SELECT * FROM table_catalog` to discover available tables."
-                )
-
-                with gr.Row():
-                    with gr.Column(scale=1):
-                        task_dropdown = gr.Dropdown(
-                            choices=list(TASK_CONFIG.keys()),
-                            value="basic_retrieval",
-                            label="Task",
+                        chatbot = gr.Chatbot(
+                            value=[],
+                            height=420,
+                            label="Agent Chat",
                         )
-                        reset_btn = gr.Button("Reset Environment", variant="primary")
-                        budget_display = gr.Textbox(label="Budget", interactive=False)
-                        step_display = gr.Textbox(label="Step", interactive=False)
-                        score_display = gr.Textbox(label="Score", interactive=False)
 
-                    with gr.Column(scale=2):
-                        status_display = gr.Markdown(label="Status")
-                        question_display = gr.Textbox(label="Current Question", lines=3, interactive=False)
-                        schema_display = gr.Textbox(label="Table Schema / Tool Result", lines=6, interactive=False)
+                        gr.Markdown("**Sample questions:**")
+                        with gr.Row():
+                            sample_btn_0 = gr.Button(
+                                SAMPLE_QUESTIONS[0][:70] + "...",
+                                size="sm", variant="secondary",
+                            )
+                            sample_btn_1 = gr.Button(
+                                SAMPLE_QUESTIONS[1][:70] + "...",
+                                size="sm", variant="secondary",
+                            )
+                            sample_btn_2 = gr.Button(
+                                SAMPLE_QUESTIONS[2][:70] + "...",
+                                size="sm", variant="secondary",
+                            )
 
-                gr.Markdown("### Execute Tool")
-                with gr.Row():
-                    tool_dropdown = gr.Dropdown(
-                        choices=["sql_query", "vector_search", "web_search", "upgrade_llm", "submit_answer"],
-                        value="sql_query",
-                        label="Tool", scale=1,
-                    )
-                    query_input = gr.Textbox(
-                        label="Query",
-                        placeholder='SELECT * FROM table_catalog LIMIT 5',
-                        scale=3,
-                    )
-                    answer_input = gr.Textbox(
-                        label="Answer (for submit_answer)",
-                        placeholder="e.g., 0.532",
-                        scale=1,
-                    )
-                execute_btn = gr.Button("Execute Tool", variant="secondary")
+                        with gr.Row():
+                            user_input = gr.Textbox(
+                                placeholder="Ask a financial question or instruct the agent...",
+                                label="Your Message",
+                                scale=4,
+                                lines=1,
+                            )
+                            send_btn = gr.Button("Send", variant="primary", scale=1)
 
-                gr.Markdown("### Tool Call History")
-                tool_log_display = gr.Markdown(
-                    value="No tool calls yet. Reset the environment to start.",
-                )
+                        gr.Markdown("### Tool Call Log")
+                        tool_log_display = gr.HTML(
+                            value="<i>No tool calls yet.</i>",
+                            elem_classes=["tool-log"],
+                        )
 
                 # Wire events
                 reset_btn.click(
-                    fn=reset_env, inputs=[task_dropdown],
-                    outputs=[status_display, question_display, schema_display,
-                             tool_log_display, budget_display, step_display, score_display],
+                    fn=reset_session,
+                    inputs=[task_dropdown],
+                    outputs=[chatbot, tool_log_display, status_bar],
                 )
-                execute_btn.click(
-                    fn=execute_tool, inputs=[tool_dropdown, query_input, answer_input],
-                    outputs=[status_display, question_display, schema_display,
-                             tool_log_display, budget_display, step_display, score_display],
+                send_btn.click(
+                    fn=agent_step,
+                    inputs=[user_input, chatbot, task_dropdown],
+                    outputs=[chatbot, tool_log_display, status_bar],
+                ).then(fn=lambda: "", outputs=[user_input])
+                user_input.submit(
+                    fn=agent_step,
+                    inputs=[user_input, chatbot, task_dropdown],
+                    outputs=[chatbot, tool_log_display, status_bar],
+                ).then(fn=lambda: "", outputs=[user_input])
+
+                sample_btn_0.click(
+                    fn=lambda ch, t: use_sample_question(0, ch, t),
+                    inputs=[chatbot, task_dropdown],
+                    outputs=[chatbot, tool_log_display, status_bar],
+                )
+                sample_btn_1.click(
+                    fn=lambda ch, t: use_sample_question(1, ch, t),
+                    inputs=[chatbot, task_dropdown],
+                    outputs=[chatbot, tool_log_display, status_bar],
+                )
+                sample_btn_2.click(
+                    fn=lambda ch, t: use_sample_question(2, ch, t),
+                    inputs=[chatbot, task_dropdown],
+                    outputs=[chatbot, tool_log_display, status_bar],
                 )
 
-            # ===================== TAB 3: TRAINING =====================
-            with gr.Tab("Training Notebook"):
+            # =================== RIGHT COLUMN: DESIGN.md ===================
+            with gr.Column(scale=2):
+                gr.Markdown("## Design & Motivation")
                 gr.Markdown(
-                    "## Train an Agent with Unsloth\n\n"
-                    "We provide a Google Colab notebook that trains a small LLM (Qwen 2.5-1.5B, 4-bit LoRA) "
-                    "to learn cost-aware tool selection using **Expert Iteration** (rejection sampling + SFT).\n\n"
-                    "### What the training covers\n\n"
-                    "| Phase | Description |\n"
-                    "|-------|-------------|\n"
-                    "| 1. Random baseline | Measure random tool selection performance |\n"
-                    "| 2. Pre-train baseline | Qwen 2.5-1.5B out-of-the-box |\n"
-                    "| 3. Expert Iteration | Best-of-N rejection sampling + SFT (3 rounds) |\n"
-                    "| 4. Post-train eval | Measure improvement across all 3 tasks |\n"
-                    "| 5. Comparison plots | Score, cost, and per-episode visualizations |\n\n"
-                    "### Key insight\n\n"
-                    "The trained agent learns to **prefer free SQL queries** over expensive tools "
-                    "($3 web search / LLM upgrade), improving scores while reducing costs.\n\n"
-                    "### Open the notebook\n\n"
-                    "[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)]"
-                    "(https://colab.research.google.com/github/nsharan2000/cost-aware-finqa/blob/main/Cost_Aware_FinQA_Training.ipynb)\n\n"
-                    "Or view the source: [Cost_Aware_FinQA_Training.ipynb on GitHub]"
-                    "(https://github.com/nsharan2000/cost-aware-finqa/blob/main/Cost_Aware_FinQA_Training.ipynb)\n\n"
-                    "### Requirements\n\n"
-                    "- Google Colab with **T4 GPU** (free tier works)\n"
-                    "- ~15 minutes for full training run\n"
-                    "- No API keys needed (uses local environment)\n"
+                    value=_load_design_doc(),
+                    elem_classes=["design-doc"],
                 )
 
-            # ===================== TAB 4: DESIGN DOC =====================
-            with gr.Tab("Design & Motivation"):
-                design_content = _load_design_doc()
-                gr.Markdown(design_content)
-
     return demo
 
 
-def mount_gradio(app):
-    """Mount Gradio app onto FastAPI. API routes take precedence."""
-    demo = create_gradio_app()
-    gr.mount_gradio_app(app, demo, path="/")
-    return demo
+def _build_playground_tab(env_cls, action_cls, obs_cls):
+    """Build a Playground tab with Reset/Step/State — mirrors OpenEnv's default UI."""
+    from openenv.core.env_server.web_interface import (
+        WebInterfaceManager,
+        load_environment_metadata,
+        _extract_action_fields,
+        _is_chat_env,
+        get_quick_start_markdown,
+    )
+    from openenv.core.env_server.gradio_ui import build_gradio_app
+
+    metadata = load_environment_metadata(env_cls, "cost_aware_finqa")
+    web_manager = WebInterfaceManager(env_cls, action_cls, obs_cls, metadata)
+    action_fields = _extract_action_fields(action_cls)
+    is_chat = _is_chat_env(action_cls)
+    quick_start = get_quick_start_markdown(metadata, action_cls, obs_cls)
+
+    return build_gradio_app(
+        web_manager, action_fields, metadata, is_chat, metadata.name, quick_start
+    )
+
+
+def mount_tabbed_gradio(app, env_cls, action_cls, obs_cls):
+    """Mount tabbed Gradio UI: Agent Chat (default) + Playground."""
+    agent_chat = create_gradio_app()
+    playground = _build_playground_tab(env_cls, action_cls, obs_cls)
+
+    tabbed = gr.TabbedInterface(
+        [agent_chat, playground],
+        tab_names=["Agent Chat", "Playground"],
+        title="Cost-Aware FinQA Environment",
+    )
+    gr.mount_gradio_app(app, tabbed, path="/")
