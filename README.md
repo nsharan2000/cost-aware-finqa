@@ -78,13 +78,21 @@ Set via `FINQA_TASK` env var.
 **Final score formula:**
 
 ```
-score = correctness * max(0.1, 1 - cost/budget) * (1 - error_penalty)
+R_total = R_correctness × max(0.1, 1 - cost_spent/budget) × (1 - min(0.5, |sum_negative_rewards|))
 ```
 
-**Correctness (numerical fuzzy matching):**
+Where:
+- **R_correctness** -- numerical fuzzy matching against gold answer (no LLM judge)
+- **cost_spent/budget** -- ratio of dollars spent to total budget (floor of 0.1 ensures even max-budget runs get partial credit)
+- **sum_negative_rewards** -- accumulated penalties from bad SQL, redundant calls, etc. (capped at 0.5)
+
+**Correctness grading (programmatic, no LLM-as-judge):**
 - Within 1% error: 1.0 (exact)
 - Within 5% error: 0.6 (close)
 - Over 5% error: 0.0 (wrong)
+- For text answers: word overlap scoring (exact match = 1.0, 80%+ overlap = 0.8, 50%+ = 0.5)
+
+**Note:** LLM-as-judge is **not** used for reward signal evaluation or training as of now. The correctness grading is fully programmatic (numerical fuzzy matching + text overlap). LLM-as-judge appears only in the [training notebook](Cost_Aware_FinQA_Training.ipynb) as a post-training evaluation tool to assess process quality.
 
 **Step rewards (dense signal at every step):**
 
