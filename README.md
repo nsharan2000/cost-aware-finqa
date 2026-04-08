@@ -13,7 +13,7 @@ tags:
 
 ### How to use video submission: https://teachafy.neetorecord.com/watch/9ebe5ba8b0ec2c7ba6de
 
-An RLVE (Reinforcement Learning Virtual Environment) built with [OpenEnv](https://github.com/huggingface/openenv) for training cost-aware deep research agents on financial question answering.
+An RLVE (Reinforcement Learning from Verifiable Environments) built with [OpenEnv](https://github.com/huggingface/openenv) for training cost-aware deep research agents on financial question answering.
 
 ## Motivation
 
