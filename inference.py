@@ -146,7 +146,7 @@ async def run_task(client: OpenAI, task_name: str, num_questions: int) -> List[f
         else:
             env = await CostAwareFinqaEnv.from_space(
                 "Teachafy/cost-aware-finqa",
-                hf_token=os.getenv("HF_TOKEN"),
+                hf_token=os.getenv("HF_TOKEN") or os.getenv("API_KEY"),
             )
 
         history = []

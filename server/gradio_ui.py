@@ -14,9 +14,9 @@ import urllib.request
 import gradio as gr
 
 try:
-    from .cost_aware_finqa_environment import CostAwareFinqaEnvironment, TASK_CONFIG
+    from .cost_aware_finqa_environment import CostAwareFinqaEnvironment, TASK_CONFIG, _load_questions_for_task
 except (ImportError, SystemError):
-    from server.cost_aware_finqa_environment import CostAwareFinqaEnvironment, TASK_CONFIG
+    from server.cost_aware_finqa_environment import CostAwareFinqaEnvironment, TASK_CONFIG, _load_questions_for_task
 
 try:
     from ..models import CostAwareFinqaAction
@@ -57,6 +57,10 @@ SAMPLE_TASKS = [
     "Medium Task (Analytical Reasoning)",
     "Hard Task (Strategic Research)",
 ]
+# Preferred question IDs for sample buttons (simple, solvable questions)
+# Easy: GS net derivative liabilities change (simple subtraction: 35764 - 22176 = 13588)
+# Medium/Hard: None — use whatever comes next
+SAMPLE_QUESTION_IDS = ["ded692383bf6", None, None]
 
 
 def _get_hf_token() -> str:
@@ -347,8 +351,17 @@ def create_gradio_app():
 
     def use_sample_question(idx, chat_history, task_name):
         """Handle clicking a sample question button — always starts a fresh episode."""
-        # Force reset with the correct task for this button
         target_task = SAMPLE_TASKS[idx]
+        # If we have a preferred question ID, find its index and set it
+        preferred_id = SAMPLE_QUESTION_IDS[idx]
+        if preferred_id:
+            internal_task = TASK_DISPLAY_NAMES.get(target_task, target_task)
+            env._task_name = internal_task
+            temp_questions = _load_questions_for_task(internal_task)
+            for qi, q in enumerate(temp_questions):
+                if q["id"] == preferred_id:
+                    env._question_index = qi
+                    break
         chat_history_new, tool_log_html, status = reset_session(target_task)
         # Now run the agent on the freshly loaded question
         return agent_step("Solve this question", chat_history_new, target_task)
