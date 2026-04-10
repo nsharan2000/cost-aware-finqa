@@ -2,11 +2,10 @@
 
 ## Project Overview
 
-This is a **Cost-Aware FinQA Deep Research Agent** for the **Meta PyTorch Hackathon x Scaler School of Technology, Round 1**.
+This is a **Cost-Aware FinQA Deep Research Agent** 
 
 - **GitHub**: https://github.com/nsharan2000/cost-aware-finqa
 - **HF Space**: https://huggingface.co/spaces/Teachafy/cost-aware-finqa
-- **Deadline**: Round 1 closes 8 April 2026, 11:59 PM IST
 
 ## Architecture
 
@@ -63,9 +62,9 @@ inference.py
 The competition validator:
 1. Clones the GitHub repo to `/tmp/workspace/`
 2. Runs `pip install .` (installs package + dependencies including `openenv-core`)
-3. Injects env vars: `API_BASE_URL`, `MODEL_NAME`, `HF_TOKEN`, `IMAGE_NAME`
+3. Injects env vars: `API_BASE_URL`, `MODEL_NAME`, `API_KEY`, `IMAGE_NAME`
 4. Runs `python inference.py`
-5. All LLM calls must go through their `API_BASE_URL` (LiteLLM proxy) with `HF_TOKEN` as the API key
+5. All LLM calls must go through their `API_BASE_URL` (LiteLLM proxy) with `API_KEY`
 
 **Phase 2 checks are fail-fast** — one failure stops the pipeline.
 
@@ -75,8 +74,22 @@ The competition validator:
 |----------|---------|---------------------|
 | `API_BASE_URL` | LLM proxy endpoint | `OpenAI(base_url=API_BASE_URL)` |
 | `MODEL_NAME` | Model identifier | `client.chat.completions.create(model=MODEL_NAME)` |
-| `HF_TOKEN` | API key for LLM proxy | `OpenAI(api_key=API_KEY)` where `API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")` |
+| `API_KEY` | API key for LLM proxy | `OpenAI(api_key=API_KEY)` — prioritized over HF_TOKEN |
 | `IMAGE_NAME` | Docker image for environment | `CostAwareFinqaEnv.from_docker_image(IMAGE_NAME)` |
+
+### Environment Variable Separation (CRITICAL)
+
+The HF Space server has its own LLM needs (chat UI agent). To avoid conflicting with the validator's injected variables:
+
+| Validator-injected (DO NOT set as HF secrets) | Internal (HF secrets OK) | Purpose |
+|-----------------------------------------------|--------------------------|---------|
+| `API_KEY` | `ENV_HF_TOKEN` | LLM authentication |
+| `API_BASE_URL` | (hardcoded in gradio_ui.py) | LLM endpoint |
+| `MODEL_NAME` | `CHAT_MODEL` | Model selection |
+| `HF_TOKEN` | `ENV_HF_TOKEN` | HF authentication |
+
+**HF Space secrets currently set**: `ENV_HF_TOKEN`, `SERPER_API_KEY`
+**HF Space secrets REMOVED**: `HF_TOKEN`, `API_KEY`, `API_BASE_URL`, `MODEL_NAME`
 
 ## Known Issues & Solutions
 
@@ -118,11 +131,17 @@ from cost_aware_finqa import CostAwareFinqaAction  # → (unknown location) erro
 - Package installed but `__init__.py` missing → fallback works
 - Package not installed → fallback works
 
-### Issue #2: "No API calls through LLM proxy" (Submission #4)
+### Issue #2: "No API calls through LLM proxy" (Submissions #4, #6)
 
-**Root cause**: The import crash in `inference.py` happened before any LLM calls were made.
+**Root cause (Submission #4)**: The import crash happened before any LLM calls were made.
 
-**Fix**: Same as Issue #1 — once the import works, LLM calls go through the validator's proxy via `OpenAI(base_url=API_BASE_URL, api_key=API_KEY)`.
+**Root cause (Submission #6)**: HF Space secrets set `HF_TOKEN`, `API_KEY`, `API_BASE_URL`, `MODEL_NAME` — same names the validator injects. Our code checked `HF_TOKEN` first (`os.getenv("HF_TOKEN") or os.getenv("API_KEY")`), so when the HF Space had `HF_TOKEN` set, it used OUR key instead of the validator's proxy key.
+
+**Fix Applied** (commit 9d70a57):
+1. `inference.py`: Changed to `os.getenv("API_KEY") or os.getenv("HF_TOKEN")` — validator's `API_KEY` takes priority
+2. `server/gradio_ui.py`: Internal LLM calls now use `ENV_HF_TOKEN` instead of `HF_TOKEN`
+3. Deleted conflicting HF Space secrets: `HF_TOKEN`, `API_KEY`, `API_BASE_URL`, `MODEL_NAME`
+4. Added `ENV_HF_TOKEN` as new HF Space secret for internal server use
 
 ### Issue #3: Easy sample question scoring 0
 
@@ -136,7 +155,7 @@ from cost_aware_finqa import CostAwareFinqaAction  # → (unknown location) erro
 ## Key Files to Understand
 
 ### inference.py (what the validator runs)
-- Uses `OpenAI` client with validator-injected `API_BASE_URL` and `HF_TOKEN`
+- Uses `OpenAI` client with validator-injected `API_BASE_URL` and `API_KEY`
 - Creates environment via `CostAwareFinqaEnv.from_docker_image(IMAGE_NAME)`
 - Runs 3 tasks × 3 questions each: basic_retrieval, analytical_reasoning, strategic_research
 - Agent uses LLM to decide tools at each step (max 8 steps)
@@ -181,4 +200,5 @@ If new errors appear:
 | 3 | Apr 8 | Failed Phase 2 | ImportError: `(unknown location)` — try/except masked real error |
 | 4 | Apr 8 | Failed Phase 2 | Same ImportError + "No API calls through LLM proxy" |
 | 5 | Apr 8 | Failed Phase 2 | Same ImportError — stale build or packaging issue |
-| 6 | Apr 8 | Pending | Fixed: removed try/except, added fallback imports |
+| 6 | Apr 9 | Failed Phase 2 | Import fixed but "No API calls" — HF secrets conflicted with validator env vars |
+| 7 | Apr 9 | Pending | Fixed: renamed internal env vars, deleted conflicting HF secrets, API_KEY prioritized |
