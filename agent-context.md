@@ -131,17 +131,21 @@ from cost_aware_finqa import CostAwareFinqaAction  # → (unknown location) erro
 - Package installed but `__init__.py` missing → fallback works
 - Package not installed → fallback works
 
-### Issue #2: "No API calls through LLM proxy" (Submissions #4, #6)
+### Issue #2: "No API calls through LLM proxy" (Submissions #4, #6-9)
 
 **Root cause (Submission #4)**: The import crash happened before any LLM calls were made.
 
-**Root cause (Submission #6)**: HF Space secrets set `HF_TOKEN`, `API_KEY`, `API_BASE_URL`, `MODEL_NAME` — same names the validator injects. Our code checked `HF_TOKEN` first (`os.getenv("HF_TOKEN") or os.getenv("API_KEY")`), so when the HF Space had `HF_TOKEN` set, it used OUR key instead of the validator's proxy key.
+**Root cause (Submission #6)**: HF Space secrets set `HF_TOKEN`, `API_KEY`, `API_BASE_URL`, `MODEL_NAME` — same names the validator injects. Our code checked `HF_TOKEN` first, using OUR key instead of the validator's proxy key.
 
-**Fix Applied** (commit 9d70a57):
-1. `inference.py`: Changed to `os.getenv("API_KEY") or os.getenv("HF_TOKEN")` — validator's `API_KEY` takes priority
-2. `server/gradio_ui.py`: Internal LLM calls now use `ENV_HF_TOKEN` instead of `HF_TOKEN`
-3. Deleted conflicting HF Space secrets: `HF_TOKEN`, `API_KEY`, `API_BASE_URL`, `MODEL_NAME`
-4. Added `ENV_HF_TOKEN` as new HF Space secret for internal server use
+**Root cause (Submissions #7-9)**: Two remaining issues:
+1. `_CleanTransport` stripped OpenAI SDK headers (`user-agent`, `x-stainless-*`) — the validator's LiteLLM proxy likely uses these headers to track API calls, so stripping them made calls invisible
+2. Used `API_KEY`/`OPENAI_API_KEY` env vars instead of `HF_TOKEN` — the official guidelines specify `HF_TOKEN` as the API key variable
+
+**Fix Applied** (commit 195de7f):
+1. `inference.py`: Removed `_CleanTransport` and `httpx` entirely — plain `OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)`
+2. Changed env vars to exactly match guidelines: `HF_TOKEN`, `API_BASE_URL` (with default), `MODEL_NAME` (with default)
+3. Removed `score=` from `[END]` log format to match spec
+4. `server/gradio_ui.py`: Internal LLM calls use `ENV_HF_TOKEN` (avoids validator conflict)
 
 ### Issue #3: Easy sample question scoring 0
 
@@ -201,4 +205,7 @@ If new errors appear:
 | 4 | Apr 8 | Failed Phase 2 | Same ImportError + "No API calls through LLM proxy" |
 | 5 | Apr 8 | Failed Phase 2 | Same ImportError — stale build or packaging issue |
 | 6 | Apr 9 | Failed Phase 2 | Import fixed but "No API calls" — HF secrets conflicted with validator env vars |
-| 7 | Apr 9 | Pending | Fixed: renamed internal env vars, deleted conflicting HF secrets, API_KEY prioritized |
+| 7 | Apr 9 | Failed Phase 2 | "No API calls" — still using API_KEY/OPENAI_API_KEY + _CleanTransport stripping headers |
+| 8 | Apr 9 | Failed Phase 2 | Same — _CleanTransport still present |
+| 9 | Apr 9 | Failed Phase 2 | Same — _CleanTransport still present |
+| 10 | Apr 9 | Pending | Removed _CleanTransport entirely, use HF_TOKEN directly, plain OpenAI client, match guidelines exactly |
