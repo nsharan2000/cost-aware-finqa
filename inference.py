@@ -18,7 +18,20 @@ import sys
 import textwrap
 from typing import List, Optional
 
+import httpx
 from openai import OpenAI
+
+
+class _CleanTransport(httpx.HTTPTransport):
+    """Strip OpenAI SDK headers that LiteLLM proxies block by default."""
+
+    def handle_request(self, request):
+        request.headers = httpx.Headers(
+            {k: ("python-httpx" if k == "user-agent" else v)
+             for k, v in request.headers.items()
+             if not k.startswith("x-stainless")}
+        )
+        return super().handle_request(request)
 
 try:
     from cost_aware_finqa import CostAwareFinqaAction, CostAwareFinqaEnv
@@ -133,7 +146,11 @@ def get_agent_action(client: OpenAI, question: str, table_schema: str,
 
 
 async def main() -> None:
-    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+    client = OpenAI(
+        base_url=API_BASE_URL,
+        api_key=API_KEY,
+        http_client=httpx.Client(transport=_CleanTransport()),
+    )
 
     env = await CostAwareFinqaEnv.from_docker_image(IMAGE_NAME)
 
