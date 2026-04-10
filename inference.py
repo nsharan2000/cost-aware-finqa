@@ -18,20 +18,7 @@ import sys
 import textwrap
 from typing import List, Optional
 
-import httpx
 from openai import OpenAI
-
-
-class _CleanTransport(httpx.HTTPTransport):
-    """Strip OpenAI SDK headers that LiteLLM proxies block by default."""
-
-    def handle_request(self, request):
-        request.headers = httpx.Headers(
-            {k: ("python-httpx" if k == "user-agent" else v)
-             for k, v in request.headers.items()
-             if not k.startswith("x-stainless")}
-        )
-        return super().handle_request(request)
 
 try:
     from cost_aware_finqa import CostAwareFinqaAction, CostAwareFinqaEnv
@@ -42,12 +29,14 @@ except ImportError:
     from models import CostAwareFinqaAction  # noqa: F811
     from client import CostAwareFinqaEnv  # noqa: F811
 
+# Read environment variables with defaults where required
+API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+HF_TOKEN = os.getenv("HF_TOKEN")
 IMAGE_NAME = os.getenv("IMAGE_NAME")
-API_KEY = (os.getenv("OPENAI_API_KEY")
-           or os.getenv("API_KEY")
-           or os.getenv("HF_TOKEN"))
-API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
-MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-32B-Instruct"
+
+if HF_TOKEN is None:
+    raise ValueError("HF_TOKEN environment variable is required")
 
 TASKS = ["basic_retrieval", "analytical_reasoning", "strategic_research"]
 BENCHMARK = "cost_aware_finqa"
@@ -87,9 +76,9 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
     print(f"[STEP] step={step} action={action} reward={reward:.2f} done={done_val} error={error_val}", flush=True)
 
 
-def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+def log_end(success: bool, steps: int, rewards: List[float]) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
+    print(f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}", flush=True)
 
 
 def parse_llm_response(text: str) -> dict:
@@ -150,8 +139,7 @@ def get_agent_action(client: OpenAI, question: str, table_schema: str,
 async def main() -> None:
     client = OpenAI(
         base_url=API_BASE_URL,
-        api_key=API_KEY,
-        http_client=httpx.Client(transport=_CleanTransport()),
+        api_key=HF_TOKEN,
     )
 
     env = await CostAwareFinqaEnv.from_docker_image(IMAGE_NAME)
@@ -221,7 +209,7 @@ async def main() -> None:
             except Exception as e:
                 print(f"[DEBUG] Error in task {task} q{q_idx}: {e}", flush=True)
             finally:
-                log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+                log_end(success=success, steps=steps_taken, rewards=rewards)
 
             scores.append(score)
 
