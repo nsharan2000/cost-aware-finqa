@@ -64,8 +64,12 @@ SAMPLE_QUESTION_IDS = ["ded692383bf6", None, None]
 
 
 def _get_hf_token() -> str:
-    """Get HF token from environment, .env file, or HF Space secrets."""
-    token = os.environ.get("HF_TOKEN", "")
+    """Get HF token from environment, .env file, or HF Space secrets.
+
+    Uses ENV_HF_TOKEN (internal) to avoid conflicts with the validator's
+    HF_TOKEN injection. Falls back to HF_TOKEN for local development.
+    """
+    token = os.environ.get("ENV_HF_TOKEN", "") or os.environ.get("HF_TOKEN", "")
     if token:
         return token
     # Fallback: try .env file in project root
@@ -74,7 +78,7 @@ def _get_hf_token() -> str:
         with open(env_path) as f:
             for line in f:
                 line = line.strip()
-                if line.startswith("HF_TOKEN="):
+                if line.startswith("ENV_HF_TOKEN=") or line.startswith("HF_TOKEN="):
                     return line.split("=", 1)[1].strip().strip("'\"")
     return ""
 
