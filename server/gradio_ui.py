@@ -86,7 +86,7 @@ def _get_hf_token() -> str:
 def _call_hf_inference(messages: list, hf_token: str) -> str:
     """Call HF Inference API for the agent chat."""
     api_url = "https://router.huggingface.co/v1/chat/completions"
-    model = os.environ.get("CHAT_MODEL", "Qwen/Qwen2.5-32B-Instruct")
+    model = os.environ.get("CHAT_MODEL", "Qwen/Qwen2.5-72B-Instruct")
 
     payload = json.dumps({
         "model": model,
