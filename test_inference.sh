@@ -15,22 +15,22 @@
 
 set -euo pipefail
 
-MODE="${1:-proxy}"
+MODE="${1:-litellm}"
 
 if [ "$MODE" = "--hf" ]; then
     # Direct HF router (no local proxy needed)
     export API_BASE_URL="https://router.huggingface.co/v1"
-    export MODEL_NAME="Qwen/Qwen2.5-32B-Instruct"
+    export MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
     export HF_TOKEN="${ENV_HF_TOKEN:-$(grep -s 'ENV_HF_TOKEN=' .env 2>/dev/null | cut -d= -f2 | tr -d \"\'  || echo '')}"
     if [ -z "$HF_TOKEN" ]; then
         echo "ERROR: Set ENV_HF_TOKEN in .env or environment"
         exit 1
     fi
 else
-    # LiteLLM proxy (default)
-    export API_BASE_URL="http://localhost:4000/v1"
-    export MODEL_NAME="huggingface/Qwen/Qwen2.5-72B-Instruct"
-    export HF_TOKEN="sk-1234"  # LiteLLM default key
+    # LiteLLM proxy (default — mimics validator setup)
+    export API_BASE_URL="https://litellm.teachafy.com"
+    export MODEL_NAME="gpt-5.4-mini"
+    export HF_TOKEN="sk-BkzawtYwKapx1FdZcuz7fg"
 fi
 
 # Docker image — pulls from HF registry

@@ -18,7 +18,21 @@ import sys
 import textwrap
 from typing import List, Optional
 
+import httpx
 from openai import OpenAI
+
+
+class _LiteLLMTransport(httpx.HTTPTransport):
+    """Strip OpenAI SDK headers that LiteLLM proxies block by default."""
+
+    def handle_request(self, request):
+        request.headers = httpx.Headers(
+            {k: ("python-httpx" if k == "user-agent" else v)
+             for k, v in request.headers.items()
+             if not k.startswith("x-stainless")}
+        )
+        return super().handle_request(request)
+
 
 try:
     from cost_aware_finqa import CostAwareFinqaAction, CostAwareFinqaEnv
@@ -119,16 +133,20 @@ def get_agent_action(client: OpenAI, question: str, table_schema: str,
     """).strip()
 
     try:
-        completion = client.chat.completions.create(
+        kwargs = dict(
             model=MODEL_NAME,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=TEMPERATURE,
             max_tokens=MAX_TOKENS,
             stream=False,
         )
+        # Some models (e.g. gpt-5 family) don't support temperature
+        try:
+            completion = client.chat.completions.create(temperature=TEMPERATURE, **kwargs)
+        except Exception:
+            completion = client.chat.completions.create(**kwargs)
         text = (completion.choices[0].message.content or "").strip()
         return parse_llm_response(text)
     except Exception as exc:
@@ -140,6 +158,7 @@ async def main() -> None:
     client = OpenAI(
         base_url=API_BASE_URL,
         api_key=HF_TOKEN,
+        http_client=httpx.Client(transport=_LiteLLMTransport()),
     )
 
     env = await CostAwareFinqaEnv.from_docker_image(IMAGE_NAME)
