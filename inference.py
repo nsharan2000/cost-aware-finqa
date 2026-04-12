@@ -18,20 +18,7 @@ import sys
 import textwrap
 from typing import List, Optional
 
-import httpx
 from openai import OpenAI
-
-
-class _LiteLLMTransport(httpx.HTTPTransport):
-    """Strip OpenAI SDK headers that LiteLLM proxies block by default."""
-
-    def handle_request(self, request):
-        request.headers = httpx.Headers(
-            {k: ("python-httpx" if k == "user-agent" else v)
-             for k, v in request.headers.items()
-             if not k.startswith("x-stainless")}
-        )
-        return super().handle_request(request)
 
 
 try:
@@ -43,14 +30,10 @@ except ImportError:
     from models import CostAwareFinqaAction  # noqa: F811
     from client import CostAwareFinqaEnv  # noqa: F811
 
-# Read environment variables with defaults where required
-API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-HF_TOKEN = os.getenv("HF_TOKEN")
-IMAGE_NAME = os.getenv("IMAGE_NAME")
-
-if HF_TOKEN is None:
-    raise ValueError("HF_TOKEN environment variable is required")
+API_BASE_URL = os.environ["API_BASE_URL"]
+MODEL_NAME = os.environ["MODEL_NAME"]
+HF_TOKEN = os.environ["HF_TOKEN"]
+IMAGE_NAME = os.environ["IMAGE_NAME"]
 
 TASKS = ["basic_retrieval", "analytical_reasoning", "strategic_research"]
 BENCHMARK = "cost_aware_finqa"
@@ -158,7 +141,6 @@ async def main() -> None:
     client = OpenAI(
         base_url=API_BASE_URL,
         api_key=HF_TOKEN,
-        http_client=httpx.Client(transport=_LiteLLMTransport()),
     )
 
     env = await CostAwareFinqaEnv.from_docker_image(IMAGE_NAME)
